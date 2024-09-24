@@ -1,0 +1,10 @@
+[package]
+name = "usb_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+crossterm = "0.28.1"
+futures-lite = "2.3.0"
+nusb = "0.1.10"
+ratatui = "0.28.1"
