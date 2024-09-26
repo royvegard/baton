@@ -42,7 +42,8 @@ impl FaderCommand {
     fn as_array(&self) -> [u8; 28] {
         let mut arr = [0u8; 28];
         let mut i = 0;
-        for b in (self.mode as u32).to_le_bytes() {
+
+        for b in self.mode.to_le_bytes() {
             arr[i] = b;
             i += 1;
         }
@@ -62,7 +63,7 @@ impl FaderCommand {
             arr[i] = b;
             i += 1;
         }
-        for b in (self.output_channel as u32).to_le_bytes() {
+        for b in self.output_channel.to_le_bytes() {
             arr[i] = b;
             i += 1;
         }
