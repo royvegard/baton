@@ -94,23 +94,23 @@ fn main() {
     }
 
     for c in device.configurations() {
-        println!("{:?}", c);
+        println!("configuration: {:?}", c);
     }
 
     let desc = device
         .get_string_descriptor(0x09, 0, Duration::from_millis(100))
         .unwrap();
-    println!("{}", desc);
+    println!("desc:\n{}", desc);
 
     let configuration = device
         .get_descriptor(0x02, 0x00, 0x0000, Duration::from_millis(100))
         .unwrap();
-    println!("{:?}", configuration);
+    println!("configuration:\n{:?}", configuration);
 
     let mut fader = FaderCommand::new();
-    println!("{:?}", fader.as_array());
+    println!("fader: {:?}", fader.as_array());
     fader.set_db(-6.0);
-    println!("{:?}", fader.as_array());
+    println!("fader: {:?}", fader.as_array());
 
     let fader_control: ControlOut = ControlOut {
         control_type: ControlType::Vendor,
@@ -125,7 +125,7 @@ fn main() {
         .into_result()
         .unwrap();
 
-    print!("{:?}", result);
+    print!("result:\n{:?}", result);
 }
 
 #[cfg(test)]
