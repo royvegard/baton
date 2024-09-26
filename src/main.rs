@@ -108,24 +108,54 @@ fn main() {
     println!("configuration:\n{:?}", configuration);
 
     let mut fader = FaderCommand::new();
-    println!("fader: {:?}", fader.as_array());
-    fader.set_db(-6.0);
-    println!("fader: {:?}", fader.as_array());
+    fader.mode = MODE_BUS_STRIP;
+    fader.output_strip = 0x04;
 
-    let fader_control: ControlOut = ControlOut {
-        control_type: ControlType::Vendor,
-        recipient: Recipient::Device,
-        request: 160,
-        value: 0x0000,
-        index: 0,
-        data: &fader.as_array(),
-    };
+    let mut line = String::with_capacity(5);
+    while true {
+        println!("\nEnter db (q to qiut)");
+        line.clear();
+        std::io::stdin()
+            .read_line(&mut line)
+            .expect("Failed to read line");
 
-    let result = block_on(device.control_out(fader_control))
-        .into_result()
-        .unwrap();
+        if line.trim_end() == "q" {
+            break;
+        }
 
-    print!("result:\n{:?}", result);
+        if let Ok(db) = line.trim_end().parse::<f64>() {
+            fader.set_db(db);
+            fader.output_channel = LEFT;
+            println!("setting volume to {}", fader.value);
+
+            let fader_control: ControlOut = ControlOut {
+                control_type: ControlType::Vendor,
+                recipient: Recipient::Device,
+                request: 160,
+                value: 0x0000,
+                index: 0,
+                data: &fader.as_array(),
+            };
+
+            let result = block_on(device.control_out(fader_control))
+                .into_result()
+                .unwrap();
+
+            fader.output_channel = RIGHT;
+            let fader_control: ControlOut = ControlOut {
+                control_type: ControlType::Vendor,
+                recipient: Recipient::Device,
+                request: 160,
+                value: 0x0000,
+                index: 0,
+                data: &fader.as_array(),
+            };
+
+            let result = block_on(device.control_out(fader_control))
+                .into_result()
+                .unwrap();
+        };
+    }
 }
 
 #[cfg(test)]
