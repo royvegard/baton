@@ -1,197 +1,285 @@
-use futures_lite::future::block_on;
-use nusb::transfer::{ControlOut, ControlType, Recipient};
-use std::{f64::consts::E, time::Duration};
+use std::io;
+
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::{
+    layout::{Constraint, Layout, Margin},
+    style::{Color, Style, Stylize},
+    text::Line,
+    widgets::{Bar, BarChart, BarGroup, Block, Paragraph},
+    DefaultTerminal, Frame,
+};
+
+fn main() -> io::Result<()> {
+    let mut terminal = ratatui::init();
+    let mut names = vec![];
+
+    for i in 1..=36 {
+        names.push(format!("MIC {}", i));
+    }
+    names.push("MAIN 1-2".to_string());
+    names.push("AUX 3-4".to_string());
+    names.push("AUX 5-6".to_string());
+    names.push("AUX 7-8".to_string());
+    names.push("AUX 9-10".to_string());
+    names.push("AUX 11-12".to_string());
+    names.push("AUX 13-14".to_string());
+    names.push("AUX 15-16".to_string());
+
+    let app_result = App::from_channel_names(&names).run(&mut terminal);
+    ratatui::restore();
+    app_result
+}
+
+pub struct App {
+    exit: bool,
+    strips: Vec<Strip>,
+    active_strip_index: usize,
+    first_strip_index: usize,
+    strip_width: u16,
+    strip_display_cap: u16,
+    status_line: String,
+}
 
 #[derive(Debug)]
-struct FaderCommand {
-    mode: u32,
-    input_strip: u32,
-    fix1: u32,
-    fix2: u32,
-    output_strip: u32,
-    output_channel: u32,
-    value: u32,
+enum StripKind {
+    Channel,
+    Bus,
+    Main,
 }
 
-// Modes
-const MODE_BUTTON: u32 = 0x00;
-const MODE_CHANNEL_STRIP: u32 = 0x64;
-const MODE_BUS_STRIP: u32 = 0x65;
+pub struct Strip {
+    name: String,
+    fader: f64,
+    balance: f64,
+    solo: bool,
+    mute: bool,
+    max: f64,
+    min: f64,
+    active: bool,
+    kind: StripKind,
+}
 
-// Output channels
-const LEFT: u32 = 0x00;
-const RIGHT: u32 = 0x01;
-
-// Fader presets
-const MUTED: u32 = 0x00;
-const UNITY: u32 = 0xbc000000;
-
-impl FaderCommand {
-    fn new() -> Self {
-        FaderCommand {
-            mode: MODE_CHANNEL_STRIP,
-            input_strip: 0x00,
-            fix1: 0x50617269,
-            fix2: 0x14,
-            output_strip: 0x04,
-            output_channel: LEFT,
-            value: 0x00000000,
-        }
-    }
-
-    fn as_array(&self) -> [u8; 28] {
-        let mut arr = [0u8; 28];
-        let mut i = 0;
-
-        for b in self.mode.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.input_strip.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.fix1.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.fix2.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.output_strip.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.output_channel.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.value.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-
-        arr
-    }
-
-    fn set_db(&mut self, db: f64) {
-        self.value = (11877360.0 * E.powf(db.clamp(-96.0, 10.0) / 10.0)) as u32;
+impl Strip {
+    fn set_fader(&mut self, value: f64) {
+        self.fader = value.clamp(self.min, self.max);
     }
 }
 
-fn main() {
-    let device_info = nusb::list_devices()
-        .unwrap()
-        .find(|dev| dev.vendor_id() == 0x194f && dev.product_id() == 0x010d)
-        .expect("device not connected");
+impl App {
+    fn from_channel_names(names: &[String]) -> Self {
+        let mut strips: Vec<Strip> = vec![];
+        for n in names {
+            let mut strip = Strip {
+                name: n.to_string(),
+                active: false,
+                fader: 0.0,
+                solo: false,
+                mute: false,
+                min: -96.0,
+                max: 10.0,
+                balance: 0.0,
+                kind: StripKind::Channel,
+            };
 
-    let device = device_info.open().expect("failed to open device");
-    let interface = device.claim_interface(0);
+            if n.contains("AUX") {
+                strip.kind = StripKind::Bus;
+            }
+            if n.contains("MAIN") {
+                strip.kind = StripKind::Main;
+            }
 
-    for i in device_info.interfaces() {
-        println!("{:?}", i);
-    }
-
-    for c in device.configurations() {
-        println!("configuration: {:?}", c);
-    }
-
-    let desc = device
-        .get_string_descriptor(0x09, 0, Duration::from_millis(100))
-        .unwrap();
-    println!("desc:\n{}", desc);
-
-    let configuration = device
-        .get_descriptor(0x02, 0x00, 0x0000, Duration::from_millis(100))
-        .unwrap();
-    println!("configuration:\n{:?}", configuration);
-
-    let mut fader = FaderCommand::new();
-    fader.mode = MODE_BUS_STRIP;
-    fader.output_strip = 0x04;
-
-    let mut line = String::with_capacity(5);
-    while true {
-        println!("\nEnter db (q to qiut)");
-        line.clear();
-        std::io::stdin()
-            .read_line(&mut line)
-            .expect("Failed to read line");
-
-        if line.trim_end() == "q" {
-            break;
+            strips.push(strip);
         }
 
-        if let Ok(db) = line.trim_end().parse::<f64>() {
-            fader.set_db(db);
-            fader.output_channel = LEFT;
-            println!("setting volume to {}", fader.value);
-
-            let fader_control: ControlOut = ControlOut {
-                control_type: ControlType::Vendor,
-                recipient: Recipient::Device,
-                request: 160,
-                value: 0x0000,
-                index: 0,
-                data: &fader.as_array(),
-            };
-
-            let result = block_on(device.control_out(fader_control))
-                .into_result()
-                .unwrap();
-
-            fader.output_channel = RIGHT;
-            let fader_control: ControlOut = ControlOut {
-                control_type: ControlType::Vendor,
-                recipient: Recipient::Device,
-                request: 160,
-                value: 0x0000,
-                index: 0,
-                data: &fader.as_array(),
-            };
-
-            let result = block_on(device.control_out(fader_control))
-                .into_result()
-                .unwrap();
+        let mut app = App {
+            exit: false,
+            strips,
+            active_strip_index: 0,
+            strip_width: 5,
+            strip_display_cap: 1,
+            first_strip_index: 0,
+            status_line: String::with_capacity(256),
         };
-    }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fadercommand_set_db() {
-        let mut fader = FaderCommand::new();
-        fader.set_db(-96.0);
-        fader.set_db(-10.0);
-        fader.set_db(0.0);
-        fader.set_db(10.0);
+        app.set_active_strip(app.active_strip_index as isize);
+        app
     }
 
-    #[test]
-    fn fadercommand_set_value() {
-        let mut fader = FaderCommand::new();
-        fader.value = UNITY;
-        fader.value = MUTED;
+    fn set_active_strip(&mut self, index: isize) {
+        self.active_strip_index = index.clamp(0, (self.strips.len() - 1) as isize) as usize;
+
+        for s in &mut self.strips {
+            s.active = false;
+        }
+        self.strips[self.active_strip_index].active = true;
     }
 
-    #[test]
-    fn fadercommand_as_array() {
-        let mut fader = FaderCommand::new();
-        let a = [
-            0x65, 0x00, 0x00, 0x00, 0x22, 0x00, 0x00, 0x00, 0x69, 0x72, 0x61, 0x50, 0x14, 0x00,
-            0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x26, 0x70, 0xc1, 0x00,
-        ];
+    /// runs the application's main loop until the user quits
+    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
+        while !self.exit {
+            terminal.draw(|frame| self.draw(frame))?;
+            self.handle_events()?;
+        }
+        Ok(())
+    }
 
-        fader.mode = MODE_BUS_STRIP;
-        fader.value = 12677158;
-        fader.set_db(0.651678);
-        fader.input_strip = 0x22;
-        fader.output_strip = 0x04;
-        fader.output_channel = RIGHT;
-        assert_eq!(fader.as_array(), a);
+    fn draw(&mut self, frame: &mut Frame) {
+        let [title_area, strips_area, status_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Fill(1),
+            Constraint::Length(3),
+        ])
+        .spacing(0)
+        .areas(frame.area());
+
+        let strips_width = strips_area.inner(Margin::new(1, 1)).width;
+
+        self.status_line.clear();
+        self.status_line.push_str(&format!(
+            "{:?} {} ({:>5.1})",
+            self.strips[self.active_strip_index].kind,
+            self.strips[self.active_strip_index].name,
+            self.strips[self.active_strip_index].fader
+        ));
+
+        self.strip_display_cap = strips_width / (self.strip_width + 1);
+
+        let status_line = Line::from(self.status_line.as_str()).left_aligned();
+
+        while self.active_strip_index < self.first_strip_index {
+            self.first_strip_index -= 1;
+        }
+        while self.active_strip_index > self.first_strip_index + self.strip_display_cap as usize - 1
+        {
+            self.first_strip_index += 1;
+        }
+
+        frame.render_widget("Mixer".bold().into_centered_line(), title_area);
+        frame.render_widget(self.vertical_barchart(&self.strips), strips_area);
+        frame.render_widget(
+            Paragraph::new(status_line).block(Block::bordered().title("Status")),
+            status_area,
+        );
+    }
+
+    fn handle_events(&mut self) -> io::Result<()> {
+        match event::read()? {
+            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                self.handle_key_event(key_event)
+            }
+            _ => {}
+        };
+        Ok(())
+    }
+
+    fn handle_key_event(&mut self, key_event: KeyEvent) {
+        match key_event.code {
+            KeyCode::Char('q') => self.exit(),
+            KeyCode::Down => {
+                if key_event.modifiers == KeyModifiers::SHIFT {
+                    self.increment_fader(-0.1);
+                } else if key_event.modifiers == KeyModifiers::CONTROL {
+                    self.increment_fader(-10.0);
+                } else {
+                    self.increment_fader(-1.0);
+                }
+            }
+            KeyCode::Up => {
+                if key_event.modifiers == KeyModifiers::SHIFT {
+                    self.increment_fader(0.1);
+                } else if key_event.modifiers == KeyModifiers::CONTROL {
+                    self.increment_fader(10.0);
+                } else {
+                    self.increment_fader(1.0);
+                }
+            }
+            KeyCode::Left => {
+                if key_event.modifiers == KeyModifiers::CONTROL {
+                    self.increment_strip_width(-1);
+                } else {
+                    self.decrement_strip();
+                }
+            }
+            KeyCode::Right => {
+                if key_event.modifiers == KeyModifiers::CONTROL {
+                    self.increment_strip_width(1);
+                } else {
+                    self.increment_strip();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn exit(&mut self) {
+        self.exit = true;
+    }
+
+    fn increment_fader(&mut self, delta: f64) {
+        let current = self.strips[self.active_strip_index].fader;
+        self.strips[self.active_strip_index].set_fader(current + delta);
+    }
+
+    fn decrement_strip(&mut self) {
+        self.set_active_strip(self.active_strip_index as isize - 1);
+    }
+
+    fn increment_strip(&mut self) {
+        self.set_active_strip(self.active_strip_index as isize + 1);
+    }
+
+    fn increment_strip_width(&mut self, delta: i16) {
+        let w = ((self.strip_width as i16 + delta).clamp(3, 15)) as u16;
+        self.strip_width = w;
+    }
+
+    fn vertical_barchart(&self, strips: &[Strip]) -> BarChart {
+        let bars: Vec<Bar> = strips
+            .iter()
+            .map(|strip| self.vertical_bar(strip))
+            .collect();
+        let title = Line::from("Channel Strips").centered();
+
+        BarChart::default()
+            .data(BarGroup::default().bars(&bars[self.first_strip_index..]))
+            .block(Block::bordered().title(title))
+            .bar_width(self.strip_width)
+            .max(500)
+    }
+
+    fn vertical_bar(&self, strip: &Strip) -> Bar {
+        let a = strip.min;
+        let b = strip.max;
+        let c = 4.0;
+        let d = 500.0;
+        let t = strip.fader;
+
+        let value: u64 = (c + ((d - c) / (b - a)) * (t - a)) as u64;
+
+        let mut fg_color: Color;
+        let bg_color = Color::DarkGray;
+
+        match strip.kind {
+            StripKind::Channel => {
+                fg_color = Color::White;
+            }
+            StripKind::Bus => {
+                fg_color = Color::Yellow;
+            }
+            StripKind::Main => {
+                fg_color = Color::LightBlue;
+            }
+        }
+        if strip.active {
+            fg_color = Color::Green;
+        }
+
+        let style = Style::new().fg(fg_color).bg(bg_color);
+
+        Bar::default()
+            .value(value)
+            .label(Line::from(strip.name.to_string()))
+            .text_value(format!("{0:>5.1}", strip.fader))
+            .style(style)
     }
 }
