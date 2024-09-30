@@ -1,33 +1,31 @@
-use futures_lite::future::block_on;
-use nusb::transfer::{ControlOut, ControlType, Recipient};
-use std::{f64::consts::E, time::Duration};
-
-#[derive(Debug)]
-struct FaderCommand {
-    mode: u32,
-    input_strip: u32,
-    fix1: u32,
-    fix2: u32,
-    output_strip: u32,
-    output_channel: u32,
-    value: u32,
-}
+use std::f64::consts::E;
 
 // Modes
-const MODE_BUTTON: u32 = 0x00;
-const MODE_CHANNEL_STRIP: u32 = 0x64;
-const MODE_BUS_STRIP: u32 = 0x65;
+pub(crate) const MODE_BUTTON: u32 = 0x00;
+pub(crate) const MODE_CHANNEL_STRIP: u32 = 0x64;
+pub(crate) const MODE_BUS_STRIP: u32 = 0x65;
 
 // Output channels
-const LEFT: u32 = 0x00;
-const RIGHT: u32 = 0x01;
+pub(crate) const LEFT: u32 = 0x00;
+pub(crate) const RIGHT: u32 = 0x01;
 
 // Fader presets
 const MUTED: u32 = 0x00;
 const UNITY: u32 = 0xbc000000;
 
+#[derive(Debug)]
+pub struct FaderCommand {
+    pub mode: u32,
+    pub input_strip: u32,
+    fix1: u32,
+    fix2: u32,
+    pub output_strip: u32,
+    pub output_channel: u32,
+    value: u32,
+}
+
 impl FaderCommand {
-    fn new() -> Self {
+    pub fn new() -> Self {
         FaderCommand {
             mode: MODE_CHANNEL_STRIP,
             input_strip: 0x00,
@@ -39,7 +37,7 @@ impl FaderCommand {
         }
     }
 
-    fn as_array(&self) -> [u8; 28] {
+    pub fn as_array(&self) -> [u8; 28] {
         let mut arr = [0u8; 28];
         let mut i = 0;
 
@@ -75,86 +73,8 @@ impl FaderCommand {
         arr
     }
 
-    fn set_db(&mut self, db: f64) {
+    pub fn set_db(&mut self, db: f64) {
         self.value = (11877360.0 * E.powf(db.clamp(-96.0, 10.0) / 10.0)) as u32;
-    }
-}
-
-fn main() {
-    let device_info = nusb::list_devices()
-        .unwrap()
-        .find(|dev| dev.vendor_id() == 0x194f && dev.product_id() == 0x010d)
-        .expect("device not connected");
-
-    let device = device_info.open().expect("failed to open device");
-    let interface = device.claim_interface(0);
-
-    for i in device_info.interfaces() {
-        println!("{:?}", i);
-    }
-
-    for c in device.configurations() {
-        println!("configuration: {:?}", c);
-    }
-
-    let desc = device
-        .get_string_descriptor(0x09, 0, Duration::from_millis(100))
-        .unwrap();
-    println!("desc:\n{}", desc);
-
-    let configuration = device
-        .get_descriptor(0x02, 0x00, 0x0000, Duration::from_millis(100))
-        .unwrap();
-    println!("configuration:\n{:?}", configuration);
-
-    let mut fader = FaderCommand::new();
-    fader.mode = MODE_BUS_STRIP;
-    fader.output_strip = 0x04;
-
-    let mut line = String::with_capacity(5);
-    while true {
-        println!("\nEnter db (q to qiut)");
-        line.clear();
-        std::io::stdin()
-            .read_line(&mut line)
-            .expect("Failed to read line");
-
-        if line.trim_end() == "q" {
-            break;
-        }
-
-        if let Ok(db) = line.trim_end().parse::<f64>() {
-            fader.set_db(db);
-            fader.output_channel = LEFT;
-            println!("setting volume to {}", fader.value);
-
-            let fader_control: ControlOut = ControlOut {
-                control_type: ControlType::Vendor,
-                recipient: Recipient::Device,
-                request: 160,
-                value: 0x0000,
-                index: 0,
-                data: &fader.as_array(),
-            };
-
-            let result = block_on(device.control_out(fader_control))
-                .into_result()
-                .unwrap();
-
-            fader.output_channel = RIGHT;
-            let fader_control: ControlOut = ControlOut {
-                control_type: ControlType::Vendor,
-                recipient: Recipient::Device,
-                request: 160,
-                value: 0x0000,
-                index: 0,
-                data: &fader.as_array(),
-            };
-
-            let result = block_on(device.control_out(fader_control))
-                .into_result()
-                .unwrap();
-        };
     }
 }
 

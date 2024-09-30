@@ -1,6 +1,11 @@
+use futures_lite::future::block_on;
 use std::io;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use nusb::{
+    transfer::{ControlOut, ControlType, Recipient},
+    Device,
+};
 use ratatui::{
     layout::{Constraint, Layout, Margin},
     style::{Color, Style, Stylize},
@@ -9,23 +14,43 @@ use ratatui::{
     DefaultTerminal, Frame,
 };
 
+mod usb;
+
 fn main() -> io::Result<()> {
+    let device_info = nusb::list_devices()
+        .unwrap()
+        .find(|dev| dev.vendor_id() == 0x194f && dev.product_id() == 0x010d)
+        .expect("device not connected");
+
+    let device = device_info.open().expect("failed to open device");
+
     let mut terminal = ratatui::init();
     let mut names = vec![];
 
-    for i in 1..=36 {
+    for i in 1..=8 {
         names.push(format!("MIC {}", i));
     }
-    names.push("MAIN 1-2".to_string());
+    for i in 1..=8 {
+        names.push(format!("ADAT {}", i));
+    }
+    names.push("S/PDIF 1".to_string());
+    names.push("S/PDIF 2".to_string());
+    for i in 1..=16 {
+        names.push(format!("DAW {}", i));
+    }
+    names.push("S/PDIF 1".to_string());
+    names.push("S/PDIF 2".to_string());
+
     names.push("AUX 3-4".to_string());
     names.push("AUX 5-6".to_string());
     names.push("AUX 7-8".to_string());
+    names.push("MAIN 1-2".to_string());
     names.push("AUX 9-10".to_string());
     names.push("AUX 11-12".to_string());
     names.push("AUX 13-14".to_string());
     names.push("AUX 15-16".to_string());
 
-    let app_result = App::from_channel_names(&names).run(&mut terminal);
+    let app_result = App::from_channel_names(&names, device).run(&mut terminal);
     ratatui::restore();
     app_result
 }
@@ -38,13 +63,15 @@ pub struct App {
     strip_width: u16,
     strip_display_cap: u16,
     status_line: String,
+    usb_command: usb::FaderCommand,
+    usb_device: Device,
 }
 
 #[derive(Debug)]
 enum StripKind {
     Channel,
-    Bus,
-    Main,
+    Bus(u32),
+    Main(u32),
 }
 
 pub struct Strip {
@@ -66,8 +93,9 @@ impl Strip {
 }
 
 impl App {
-    fn from_channel_names(names: &[String]) -> Self {
+    fn from_channel_names(names: &[String], device: Device) -> Self {
         let mut strips: Vec<Strip> = vec![];
+        let mut bus_number = 1;
         for n in names {
             let mut strip = Strip {
                 name: n.to_string(),
@@ -82,10 +110,12 @@ impl App {
             };
 
             if n.contains("AUX") {
-                strip.kind = StripKind::Bus;
+                strip.kind = StripKind::Bus(bus_number);
+                bus_number += 1;
             }
             if n.contains("MAIN") {
-                strip.kind = StripKind::Main;
+                strip.kind = StripKind::Main(bus_number);
+                bus_number += 1;
             }
 
             strips.push(strip);
@@ -99,6 +129,8 @@ impl App {
             strip_display_cap: 1,
             first_strip_index: 0,
             status_line: String::with_capacity(256),
+            usb_command: usb::FaderCommand::new(),
+            usb_device: device,
         };
 
         app.set_active_strip(app.active_strip_index as isize);
@@ -136,7 +168,7 @@ impl App {
 
         self.status_line.clear();
         self.status_line.push_str(&format!(
-            "{:?} {} ({:>5.1})",
+            "{:?} {} ({:>5.1} dB)",
             self.strips[self.active_strip_index].kind,
             self.strips[self.active_strip_index].name,
             self.strips[self.active_strip_index].fader
@@ -215,9 +247,66 @@ impl App {
         self.exit = true;
     }
 
+    fn send_usb_command(&self) {
+        let fader_control: ControlOut = ControlOut {
+            control_type: ControlType::Vendor,
+            recipient: Recipient::Device,
+            request: 160,
+            value: 0x0000,
+            index: 0,
+            data: &self.usb_command.as_array(),
+        };
+
+        let result = block_on(self.usb_device.control_out(fader_control))
+            .into_result()
+            .unwrap();
+    }
+
     fn increment_fader(&mut self, delta: f64) {
         let current = self.strips[self.active_strip_index].fader;
         self.strips[self.active_strip_index].set_fader(current + delta);
+
+        self.usb_command
+            .set_db(self.strips[self.active_strip_index].fader);
+
+        match self.strips[self.active_strip_index].kind {
+            StripKind::Main(n) => {
+                self.usb_command.input_strip = 0x00;
+                self.usb_command.output_strip = n;
+                self.usb_command.mode = usb::MODE_BUS_STRIP;
+
+                self.usb_command.output_channel = usb::LEFT;
+                self.send_usb_command();
+                self.usb_command.output_channel = usb::RIGHT;
+                self.send_usb_command();
+            }
+            StripKind::Channel => {
+                self.usb_command.input_strip = self.active_strip_index as u32;
+                self.usb_command.mode = usb::MODE_CHANNEL_STRIP;
+
+                self.usb_command.output_strip = 0x04;
+                self.usb_command.output_channel = usb::LEFT;
+                self.send_usb_command();
+                self.usb_command.output_channel = usb::RIGHT;
+                self.send_usb_command();
+
+                self.usb_command.output_strip = 0x00;
+                self.usb_command.output_channel = usb::LEFT;
+                self.send_usb_command();
+                self.usb_command.output_channel = usb::RIGHT;
+                self.send_usb_command();
+            }
+            StripKind::Bus(n) => {
+                self.usb_command.input_strip = 0x00;
+                self.usb_command.output_strip = n;
+                self.usb_command.mode = usb::MODE_BUS_STRIP;
+
+                self.usb_command.output_channel = usb::LEFT;
+                self.send_usb_command();
+                self.usb_command.output_channel = usb::RIGHT;
+                self.send_usb_command();
+            }
+        }
     }
 
     fn decrement_strip(&mut self) {
@@ -263,10 +352,10 @@ impl App {
             StripKind::Channel => {
                 fg_color = Color::White;
             }
-            StripKind::Bus => {
+            StripKind::Bus(_) => {
                 fg_color = Color::Yellow;
             }
-            StripKind::Main => {
+            StripKind::Main(_) => {
                 fg_color = Color::LightBlue;
             }
         }
