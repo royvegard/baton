@@ -1,4 +1,12 @@
-use std::f64::consts::E;
+use futures_lite::future::block_on;
+use nusb::{
+    transfer::{ControlOut, ControlType, Recipient, ResponseBuffer, TransferError},
+    Device,
+};
+use std::{
+    f64::consts::E,
+    io::{self, ErrorKind},
+};
 
 // Modes
 pub(crate) const MODE_BUTTON: u32 = 0x00;
@@ -13,8 +21,40 @@ pub(crate) const RIGHT: u32 = 0x01;
 const MUTED: u32 = 0x00;
 const UNITY: u32 = 0xbc000000;
 
+pub struct PreSonusStudio1824c {
+    pub device: Device,
+    pub command: Command,
+}
+
+impl PreSonusStudio1824c {
+    pub fn new() -> Result<Self, io::Error> {
+        let device_info = match nusb::list_devices()?
+            .find(|dev| dev.vendor_id() == 0x194f && dev.product_id() == 0x010d)
+        {
+            Some(d) => d,
+            None => {
+                return Err(io::Error::new(
+                    ErrorKind::NotFound,
+                    "PreSonus STUDIO1824c not found",
+                ));
+            }
+        };
+
+        let device = device_info.open()?;
+
+        Ok(PreSonusStudio1824c {
+            device,
+            command: Command::new(),
+        })
+    }
+
+    pub fn send_command(&self) {
+        let _ = self.command.send_usb_command(&self.device);
+    }
+}
+
 #[derive(Debug)]
-pub struct FaderCommand {
+pub struct Command {
     pub mode: u32,
     pub input_strip: u32,
     fix1: u32,
@@ -24,9 +64,9 @@ pub struct FaderCommand {
     value: u32,
 }
 
-impl FaderCommand {
+impl Command {
     pub fn new() -> Self {
-        FaderCommand {
+        Command {
             mode: MODE_CHANNEL_STRIP,
             input_strip: 0x00,
             fix1: 0x50617269,
@@ -76,6 +116,19 @@ impl FaderCommand {
     pub fn set_db(&mut self, db: f64) {
         self.value = (11877360.0 * E.powf(db.clamp(-96.0, 10.0) / 10.0)) as u32;
     }
+
+    pub fn send_usb_command(&self, device: &Device) -> Result<ResponseBuffer, TransferError> {
+        let fader_control: ControlOut = ControlOut {
+            control_type: ControlType::Vendor,
+            recipient: Recipient::Device,
+            request: 160,
+            value: 0x0000,
+            index: 0,
+            data: &self.as_array(),
+        };
+
+        block_on(device.control_out(fader_control)).into_result()
+    }
 }
 
 #[cfg(test)]
@@ -84,7 +137,7 @@ mod tests {
 
     #[test]
     fn fadercommand_set_db() {
-        let mut fader = FaderCommand::new();
+        let mut fader = Command::new();
         fader.set_db(-96.0);
         fader.set_db(-10.0);
         fader.set_db(0.0);
@@ -93,14 +146,14 @@ mod tests {
 
     #[test]
     fn fadercommand_set_value() {
-        let mut fader = FaderCommand::new();
+        let mut fader = Command::new();
         fader.value = UNITY;
         fader.value = MUTED;
     }
 
     #[test]
     fn fadercommand_as_array() {
-        let mut fader = FaderCommand::new();
+        let mut fader = Command::new();
         let a = [
             0x65, 0x00, 0x00, 0x00, 0x22, 0x00, 0x00, 0x00, 0x69, 0x72, 0x61, 0x50, 0x14, 0x00,
             0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x26, 0x70, 0xc1, 0x00,
