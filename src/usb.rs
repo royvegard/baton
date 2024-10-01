@@ -24,6 +24,7 @@ const UNITY: u32 = 0xbc000000;
 pub struct PreSonusStudio1824c {
     pub device: Device,
     pub command: Command,
+    pub main_mix: Mix,
 }
 
 impl PreSonusStudio1824c {
@@ -45,6 +46,7 @@ impl PreSonusStudio1824c {
         Ok(PreSonusStudio1824c {
             device,
             command: Command::new(),
+            main_mix: Mix::new(),
         })
     }
 
@@ -128,6 +130,91 @@ impl Command {
         };
 
         block_on(device.control_out(fader_control)).into_result()
+    }
+}
+
+#[derive(Debug)]
+pub enum StripKind {
+    Channel,
+    Bus,
+    Main,
+}
+
+pub struct Strip {
+    pub name: String,
+    pub fader: f64,
+    pub balance: f64,
+    pub solo: bool,
+    pub mute: bool,
+    pub max: f64,
+    pub min: f64,
+    pub active: bool,
+    pub kind: StripKind,
+    pub number: u32,
+}
+
+impl Strip {
+    pub fn set_fader(&mut self, value: f64) {
+        self.fader = value.clamp(self.min, self.max);
+    }
+}
+
+pub struct Mix {
+    pub channel_strips: Vec<Strip>,
+    pub destination_strip: Strip,
+}
+
+impl Mix {
+    pub fn new() -> Self {
+        let mut channel_strips = Vec::<Strip>::new();
+        let mut names = vec![];
+
+        for i in 1..=8 {
+            names.push(format!("MIC {}", i));
+        }
+        for i in 1..=8 {
+            names.push(format!("ADAT {}", i));
+        }
+        names.push("S/PDIF 1".to_string());
+        names.push("S/PDIF 2".to_string());
+        for i in 1..=18 {
+            names.push(format!("DAW {}", i));
+        }
+
+        for (i, n) in names.iter().enumerate() {
+            let strip = Strip {
+                name: n.to_string(),
+                active: false,
+                fader: 0.0,
+                solo: false,
+                mute: false,
+                min: -96.0,
+                max: 10.0,
+                balance: 0.0,
+                kind: StripKind::Channel,
+                number: i as u32,
+            };
+
+            channel_strips.push(strip);
+        }
+
+        let destination_strip = Strip {
+            name: "DEST".to_string(),
+            active: false,
+            fader: 0.0,
+            solo: false,
+            mute: false,
+            min: -96.0,
+            max: 10.0,
+            balance: 0.0,
+            kind: StripKind::Main,
+            number: 0,
+        };
+
+        Mix {
+            channel_strips,
+            destination_strip,
+        }
     }
 }
 

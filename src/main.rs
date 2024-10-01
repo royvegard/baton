@@ -12,39 +12,13 @@ mod usb;
 
 fn main() -> io::Result<()> {
     let mut terminal = ratatui::init();
-    let mut names = vec![];
-
-    for i in 1..=8 {
-        names.push(format!("MIC {}", i));
-    }
-    for i in 1..=8 {
-        names.push(format!("ADAT {}", i));
-    }
-    names.push("S/PDIF 1".to_string());
-    names.push("S/PDIF 2".to_string());
-    for i in 1..=16 {
-        names.push(format!("DAW {}", i));
-    }
-    names.push("S/PDIF 1".to_string());
-    names.push("S/PDIF 2".to_string());
-
-    names.push("AUX 3-4".to_string());
-    names.push("AUX 5-6".to_string());
-    names.push("AUX 7-8".to_string());
-    names.push("MAIN 1-2".to_string());
-    names.push("AUX 9-10".to_string());
-    names.push("AUX 11-12".to_string());
-    names.push("AUX 13-14".to_string());
-    names.push("AUX 15-16".to_string());
-
-    let app_result = App::from_channel_names(&names).run(&mut terminal);
+    let app_result = App::new().run(&mut terminal);
     ratatui::restore();
     app_result
 }
 
 pub struct App {
     exit: bool,
-    strips: Vec<Strip>,
     active_strip_index: usize,
     first_strip_index: usize,
     strip_width: u16,
@@ -53,63 +27,10 @@ pub struct App {
     ps: usb::PreSonusStudio1824c,
 }
 
-#[derive(Debug)]
-enum StripKind {
-    Channel,
-    Bus(u32),
-    Main(u32),
-}
-
-pub struct Strip {
-    name: String,
-    fader: f64,
-    balance: f64,
-    solo: bool,
-    mute: bool,
-    max: f64,
-    min: f64,
-    active: bool,
-    kind: StripKind,
-}
-
-impl Strip {
-    fn set_fader(&mut self, value: f64) {
-        self.fader = value.clamp(self.min, self.max);
-    }
-}
-
 impl App {
-    fn from_channel_names(names: &[String]) -> Self {
-        let mut strips: Vec<Strip> = vec![];
-        let mut bus_number = 1;
-        for n in names {
-            let mut strip = Strip {
-                name: n.to_string(),
-                active: false,
-                fader: 0.0,
-                solo: false,
-                mute: false,
-                min: -96.0,
-                max: 10.0,
-                balance: 0.0,
-                kind: StripKind::Channel,
-            };
-
-            if n.contains("AUX") {
-                strip.kind = StripKind::Bus(bus_number);
-                bus_number += 1;
-            }
-            if n.contains("MAIN") {
-                strip.kind = StripKind::Main(bus_number);
-                bus_number += 1;
-            }
-
-            strips.push(strip);
-        }
-
+    fn new() -> Self {
         let mut app = App {
             exit: false,
-            strips,
             active_strip_index: 0,
             strip_width: 5,
             strip_display_cap: 1,
@@ -123,12 +44,13 @@ impl App {
     }
 
     fn set_active_strip(&mut self, index: isize) {
-        self.active_strip_index = index.clamp(0, (self.strips.len() - 1) as isize) as usize;
+        self.active_strip_index =
+            index.clamp(0, (self.ps.main_mix.channel_strips.len() - 1) as isize) as usize;
 
-        for s in &mut self.strips {
+        for s in &mut self.ps.main_mix.channel_strips {
             s.active = false;
         }
-        self.strips[self.active_strip_index].active = true;
+        self.ps.main_mix.channel_strips[self.active_strip_index].active = true;
     }
 
     /// runs the application's main loop until the user quits
@@ -153,10 +75,11 @@ impl App {
 
         self.status_line.clear();
         self.status_line.push_str(&format!(
-            "{:?} {} ({:>5.1} dB)",
-            self.strips[self.active_strip_index].kind,
-            self.strips[self.active_strip_index].name,
-            self.strips[self.active_strip_index].fader
+            "{:?} {} - {} ({:>5.1} dB)",
+            self.ps.main_mix.channel_strips[self.active_strip_index].kind,
+            self.ps.main_mix.channel_strips[self.active_strip_index].number,
+            self.ps.main_mix.channel_strips[self.active_strip_index].name,
+            self.ps.main_mix.channel_strips[self.active_strip_index].fader
         ));
 
         self.strip_display_cap = strips_width / (self.strip_width + 1);
@@ -172,7 +95,10 @@ impl App {
         }
 
         frame.render_widget("Mixer".bold().into_centered_line(), title_area);
-        frame.render_widget(self.vertical_barchart(&self.strips), strips_area);
+        frame.render_widget(
+            self.vertical_barchart(&self.ps.main_mix.channel_strips),
+            strips_area,
+        );
         frame.render_widget(
             Paragraph::new(status_line).block(Block::bordered().title("Status")),
             status_area,
@@ -233,49 +159,29 @@ impl App {
     }
 
     fn increment_fader(&mut self, delta: f64) {
-        let current = self.strips[self.active_strip_index].fader;
-        self.strips[self.active_strip_index].set_fader(current + delta);
+        let current = self.ps.main_mix.channel_strips[self.active_strip_index].fader;
+        self.ps.main_mix.channel_strips[self.active_strip_index].set_fader(current + delta);
 
         self.ps
             .command
-            .set_db(self.strips[self.active_strip_index].fader);
+            .set_db(self.ps.main_mix.channel_strips[self.active_strip_index].fader);
 
-        match self.strips[self.active_strip_index].kind {
-            StripKind::Main(n) => {
+        match self.ps.main_mix.channel_strips[self.active_strip_index].kind {
+            usb::StripKind::Main => {
                 self.ps.command.input_strip = 0x00;
-                self.ps.command.output_strip = n;
-                self.ps.command.mode = usb::MODE_BUS_STRIP;
-
-                self.ps.command.output_channel = usb::LEFT;
-                self.ps.send_command();
-                self.ps.command.output_channel = usb::RIGHT;
-                self.ps.send_command();
             }
-            StripKind::Channel => {
+            usb::StripKind::Channel => {
                 self.ps.command.input_strip = self.active_strip_index as u32;
                 self.ps.command.mode = usb::MODE_CHANNEL_STRIP;
 
-                self.ps.command.output_strip = 0x04;
-                self.ps.command.output_channel = usb::LEFT;
-                self.ps.send_command();
-                self.ps.command.output_channel = usb::RIGHT;
-                self.ps.send_command();
-
-                self.ps.command.output_strip = 0x00;
+                self.ps.command.output_strip = self.ps.main_mix.destination_strip.number;
                 self.ps.command.output_channel = usb::LEFT;
                 self.ps.send_command();
                 self.ps.command.output_channel = usb::RIGHT;
                 self.ps.send_command();
             }
-            StripKind::Bus(n) => {
+            usb::StripKind::Bus => {
                 self.ps.command.input_strip = 0x00;
-                self.ps.command.output_strip = n;
-                self.ps.command.mode = usb::MODE_BUS_STRIP;
-
-                self.ps.command.output_channel = usb::LEFT;
-                self.ps.send_command();
-                self.ps.command.output_channel = usb::RIGHT;
-                self.ps.send_command();
             }
         }
     }
@@ -289,11 +195,11 @@ impl App {
     }
 
     fn increment_strip_width(&mut self, delta: i16) {
-        let w = ((self.strip_width as i16 + delta).clamp(3, 15)) as u16;
+        let w = ((self.strip_width as i16 + delta).clamp(1, 15)) as u16;
         self.strip_width = w;
     }
 
-    fn vertical_barchart(&self, strips: &[Strip]) -> BarChart {
+    fn vertical_barchart(&self, strips: &[usb::Strip]) -> BarChart {
         let bars: Vec<Bar> = strips
             .iter()
             .map(|strip| self.vertical_bar(strip))
@@ -307,7 +213,7 @@ impl App {
             .max(500)
     }
 
-    fn vertical_bar(&self, strip: &Strip) -> Bar {
+    fn vertical_bar(&self, strip: &usb::Strip) -> Bar {
         let a = strip.min;
         let b = strip.max;
         let c = 4.0;
@@ -320,13 +226,13 @@ impl App {
         let bg_color = Color::DarkGray;
 
         match strip.kind {
-            StripKind::Channel => {
+            usb::StripKind::Channel => {
                 fg_color = Color::White;
             }
-            StripKind::Bus(_) => {
+            usb::StripKind::Bus => {
                 fg_color = Color::Yellow;
             }
-            StripKind::Main(_) => {
+            usb::StripKind::Main => {
                 fg_color = Color::LightBlue;
             }
         }
