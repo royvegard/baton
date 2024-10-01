@@ -13,6 +13,12 @@ pub(crate) const MODE_BUTTON: u32 = 0x00;
 pub(crate) const MODE_CHANNEL_STRIP: u32 = 0x64;
 pub(crate) const MODE_BUS_STRIP: u32 = 0x65;
 
+// Buttons
+const BUTTON_1_2_LINE: u32 = 0x00;
+const BUTTON_MAIN_MUTE: u32 = 0x01;
+const BUTTON_MAIN_MONO: u32 = 0x02;
+const BUTTON_PHANTOM_POWER: u32 = 0x04;
+
 // Output channels
 pub(crate) const LEFT: u32 = 0x00;
 pub(crate) const RIGHT: u32 = 0x01;
@@ -25,6 +31,11 @@ pub struct PreSonusStudio1824c {
     pub device: Device,
     pub command: Command,
     pub main_mix: Mix,
+    // TODO: These states can be read from device
+    pub in_1_2_line: bool,
+    pub main_mute: bool,
+    pub main_mono: bool,
+    pub phantom_power: bool,
 }
 
 impl PreSonusStudio1824c {
@@ -47,7 +58,59 @@ impl PreSonusStudio1824c {
             device,
             command: Command::new(),
             main_mix: Mix::new(StripKind::Main),
+            in_1_2_line: false,
+            main_mute: false,
+            main_mono: false,
+            phantom_power: false,
         })
+    }
+
+    pub fn set_1_2_line(&mut self, on: bool) {
+        let b: u32 = if on { 0x01 } else { 0x00 };
+        self.command.mode = MODE_BUTTON;
+        self.command.input_strip = 0x00;
+        self.command.output_strip = 0x00;
+        self.command.output_channel = BUTTON_1_2_LINE;
+        self.command.value = b;
+
+        self.send_command();
+        self.in_1_2_line = on;
+    }
+
+    pub fn set_main_mute(&mut self, on: bool) {
+        let b: u32 = if on { 0x01 } else { 0x00 };
+        self.command.mode = MODE_BUTTON;
+        self.command.input_strip = 0x00;
+        self.command.output_strip = 0x00;
+        self.command.output_channel = BUTTON_MAIN_MUTE;
+        self.command.value = b;
+
+        self.send_command();
+        self.main_mute = on;
+    }
+
+    pub fn set_main_mono(&mut self, on: bool) {
+        let b: u32 = if on { 0x01 } else { 0x00 };
+        self.command.mode = MODE_BUTTON;
+        self.command.input_strip = 0x00;
+        self.command.output_strip = 0x00;
+        self.command.output_channel = BUTTON_MAIN_MONO;
+        self.command.value = b;
+
+        self.send_command();
+        self.main_mono = on;
+    }
+
+    pub fn set_phantom_power(&mut self, on: bool) {
+        let b: u32 = if on { 0x01 } else { 0x00 };
+        self.command.mode = MODE_BUTTON;
+        self.command.input_strip = 0x00;
+        self.command.output_strip = 0x00;
+        self.command.output_channel = BUTTON_PHANTOM_POWER;
+        self.command.value = b;
+
+        self.send_command();
+        self.phantom_power = on;
     }
 
     pub fn send_command(&self) {

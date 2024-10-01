@@ -118,6 +118,10 @@ impl App {
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event.code {
             KeyCode::Char('q') => self.exit(),
+            KeyCode::Char('l') => self.toggle_1_2_line(),
+            KeyCode::Char('u') => self.toggle_main_mute(),
+            KeyCode::Char('o') => self.toggle_main_mono(),
+            KeyCode::Char('p') => self.toggle_phantom_power(),
             KeyCode::Down => {
                 if key_event.modifiers == KeyModifiers::SHIFT {
                     self.increment_fader(-0.1);
@@ -199,6 +203,25 @@ impl App {
         self.strip_width = w;
     }
 
+    fn toggle_phantom_power(&mut self) {
+        // TODO: State can be read from device
+        self.ps.set_phantom_power(!self.ps.phantom_power);
+    }
+
+    fn toggle_1_2_line(&mut self) {
+        // TODO: State can be read from device
+        self.ps.set_1_2_line(!self.ps.in_1_2_line);
+    }
+
+    fn toggle_main_mute(&mut self) {
+        // TODO: State can be read from device
+        self.ps.set_main_mute(!self.ps.main_mute);
+    }
+
+    fn toggle_main_mono(&mut self) {
+        // TODO: State can be read from device
+        self.ps.set_main_mono(!self.ps.main_mono);
+    }
     fn vertical_barchart(&self, mix: &usb::Mix) -> BarChart {
         let bars: Vec<Bar> = mix
             .channel_strips
