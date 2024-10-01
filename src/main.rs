@@ -19,6 +19,7 @@ fn main() -> io::Result<()> {
 
 pub struct App {
     exit: bool,
+    active_mix_index: usize,
     active_strip_index: usize,
     first_strip_index: usize,
     strip_width: u16,
@@ -31,10 +32,11 @@ impl App {
     fn new() -> Self {
         let mut app = App {
             exit: false,
+            active_mix_index: 0,
             active_strip_index: 0,
+            first_strip_index: 0,
             strip_width: 5,
             strip_display_cap: 1,
-            first_strip_index: 0,
             status_line: String::with_capacity(256),
             ps: usb::PreSonusStudio1824c::new().expect("Failed to open device"),
         };
@@ -43,14 +45,14 @@ impl App {
         app
     }
 
-    fn set_active_strip(&mut self, index: isize) {
-        self.active_strip_index =
-            index.clamp(0, (self.ps.main_mix.channel_strips.len() - 1) as isize) as usize;
+    fn set_active_strip(&mut self, strip_index: isize) {
+        let strips = &mut self.ps.mixes[self.active_mix_index].channel_strips;
+        self.active_strip_index = strip_index.clamp(0, (strips.len() - 1) as isize) as usize;
 
-        for s in &mut self.ps.main_mix.channel_strips {
+        for s in &mut *strips {
             s.active = false;
         }
-        self.ps.main_mix.channel_strips[self.active_strip_index].active = true;
+        strips[self.active_strip_index].active = true;
     }
 
     /// runs the application's main loop until the user quits
@@ -73,7 +75,8 @@ impl App {
 
         // Compose status text
         self.status_line.clear();
-        let active_strip = &self.ps.main_mix.channel_strips[self.active_strip_index];
+        let active_strip =
+            &self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
         self.status_line.push_str(&format!(
             "{:?} {} - {} ({:>5.1} dB) balance: {}, solo: {}, mute: {}",
             active_strip.kind,
@@ -98,7 +101,10 @@ impl App {
         }
 
         frame.render_widget("Mixer".bold().into_centered_line(), title_area);
-        frame.render_widget(self.vertical_barchart(&self.ps.main_mix), strips_area);
+        frame.render_widget(
+            self.vertical_barchart(&self.ps.mixes[self.active_mix_index]),
+            strips_area,
+        );
         frame.render_widget(
             Paragraph::new(status_line).block(Block::bordered().title("Status")),
             status_area,
@@ -122,6 +128,14 @@ impl App {
             KeyCode::Char('u') => self.toggle_main_mute(),
             KeyCode::Char('o') => self.toggle_main_mono(),
             KeyCode::Char('p') => self.toggle_phantom_power(),
+            KeyCode::Char('1') => self.set_active_mix(0),
+            KeyCode::Char('2') => self.set_active_mix(1),
+            KeyCode::Char('3') => self.set_active_mix(2),
+            KeyCode::Char('4') => self.set_active_mix(3),
+            KeyCode::Char('5') => self.set_active_mix(4),
+            KeyCode::Char('6') => self.set_active_mix(5),
+            KeyCode::Char('7') => self.set_active_mix(6),
+            KeyCode::Char('8') => self.set_active_mix(7),
             KeyCode::Down => {
                 if key_event.modifiers == KeyModifiers::SHIFT {
                     self.increment_fader(-0.1);
@@ -163,29 +177,42 @@ impl App {
     }
 
     fn increment_fader(&mut self, delta: f64) {
-        let current = self.ps.main_mix.channel_strips[self.active_strip_index].fader;
-        self.ps.main_mix.channel_strips[self.active_strip_index].set_fader(current + delta);
+        let strip =
+            &mut self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
+        let current = strip.fader;
+        strip.set_fader(current + delta);
 
-        self.ps
-            .command
-            .set_db(self.ps.main_mix.channel_strips[self.active_strip_index].fader);
+        self.ps.command.set_db(strip.fader);
 
-        match self.ps.main_mix.channel_strips[self.active_strip_index].kind {
-            usb::StripKind::Main => {
-                self.ps.command.input_strip = 0x00;
-            }
-            usb::StripKind::Channel => {
-                self.ps.command.input_strip = self.active_strip_index as u32;
-                self.ps.command.mode = usb::MODE_CHANNEL_STRIP;
-
-                self.ps.command.output_strip = self.ps.main_mix.get_destination_strip().number;
+        match strip.kind {
+            usb::StripKind::Main | usb::StripKind::Bus => {
+                self.ps.command.input_strip = self.ps.mixes[self.active_mix_index]
+                    .get_destination_strip()
+                    .number;
+                self.ps.command.mode = usb::MODE_BUS_STRIP;
+                self.ps.command.output_strip = 0x00;
                 self.ps.command.output_channel = usb::LEFT;
                 self.ps.send_command();
                 self.ps.command.output_channel = usb::RIGHT;
                 self.ps.send_command();
             }
-            usb::StripKind::Bus => {
-                self.ps.command.input_strip = 0x00;
+            usb::StripKind::Channel => {
+                let output_strip = self.ps.mixes[self.active_mix_index].get_destination_strip();
+                self.ps.command.input_strip = self.active_strip_index as u32;
+                self.ps.command.mode = usb::MODE_CHANNEL_STRIP;
+                self.ps.command.output_strip = output_strip.number;
+                self.ps.command.output_channel = usb::LEFT;
+                self.ps.send_command();
+                self.ps.command.output_channel = usb::RIGHT;
+                self.ps.send_command();
+
+                if let usb::StripKind::Main = output_strip.kind {
+                    self.ps.command.output_strip = 0;
+                    self.ps.command.output_channel = usb::LEFT;
+                    self.ps.send_command();
+                    self.ps.command.output_channel = usb::RIGHT;
+                    self.ps.send_command();
+                }
             }
         }
     }
@@ -222,13 +249,23 @@ impl App {
         // TODO: State can be read from device
         self.ps.set_main_mono(!self.ps.main_mono);
     }
+
+    fn set_active_mix(&mut self, index: usize) {
+        self.active_mix_index = index;
+        self.set_active_strip(self.active_strip_index as isize);
+    }
+
     fn vertical_barchart(&self, mix: &usb::Mix) -> BarChart {
         let bars: Vec<Bar> = mix
             .channel_strips
             .iter()
             .map(|strip| self.vertical_bar(strip))
             .collect();
-        let title = Line::from("Channel Strips").centered();
+        let title = self.ps.mixes[self.active_mix_index]
+            .get_destination_strip()
+            .name
+            .as_str();
+        let title = Line::from(title).left_aligned().bold();
 
         BarChart::default()
             .data(BarGroup::default().bars(&bars[self.first_strip_index..]))

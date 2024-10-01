@@ -30,7 +30,7 @@ const UNITY: u32 = 0xbc000000;
 pub struct PreSonusStudio1824c {
     pub device: Device,
     pub command: Command,
-    pub main_mix: Mix,
+    pub mixes: Vec<Mix>,
     // TODO: These states can be read from device
     pub in_1_2_line: bool,
     pub main_mute: bool,
@@ -57,7 +57,16 @@ impl PreSonusStudio1824c {
         Ok(PreSonusStudio1824c {
             device,
             command: Command::new(),
-            main_mix: Mix::new(StripKind::Main),
+            mixes: vec![
+                Mix::new(String::from("MAIN 1-2"), StripKind::Main, 4),
+                Mix::new(String::from("MIX 3-4"), StripKind::Bus, 1),
+                Mix::new(String::from("MIX 5-6"), StripKind::Bus, 2),
+                Mix::new(String::from("MIX 7-8"), StripKind::Bus, 3),
+                Mix::new(String::from("ADAT 9-10"), StripKind::Bus, 5),
+                Mix::new(String::from("ADAT 11-12"), StripKind::Bus, 6),
+                Mix::new(String::from("ADAT 13-14"), StripKind::Bus, 7),
+                Mix::new(String::from("ADAT 15-16"), StripKind::Bus, 8),
+            ],
             in_1_2_line: false,
             main_mute: false,
             main_mono: false,
@@ -227,7 +236,7 @@ pub struct Mix {
 }
 
 impl Mix {
-    pub fn new(dest_kind: StripKind) -> Self {
+    pub fn new(mix_name: String, mix_kind: StripKind, mix_number: u32) -> Self {
         let mut channel_strips = Vec::<Strip>::new();
         let mut names = vec![];
 
@@ -262,7 +271,7 @@ impl Mix {
 
         // The last strip is the destination strip
         let destination_strip = Strip {
-            name: "DEST".to_string(),
+            name: mix_name,
             active: false,
             fader: 0.0,
             solo: false,
@@ -270,8 +279,8 @@ impl Mix {
             min: -96.0,
             max: 10.0,
             balance: 0.0,
-            kind: dest_kind,
-            number: 0,
+            kind: mix_kind,
+            number: mix_number,
         };
 
         channel_strips.push(destination_strip);
