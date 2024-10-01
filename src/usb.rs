@@ -46,7 +46,7 @@ impl PreSonusStudio1824c {
         Ok(PreSonusStudio1824c {
             device,
             command: Command::new(),
-            main_mix: Mix::new(),
+            main_mix: Mix::new(StripKind::Main),
         })
     }
 
@@ -161,11 +161,10 @@ impl Strip {
 
 pub struct Mix {
     pub channel_strips: Vec<Strip>,
-    pub destination_strip: Strip,
 }
 
 impl Mix {
-    pub fn new() -> Self {
+    pub fn new(dest_kind: StripKind) -> Self {
         let mut channel_strips = Vec::<Strip>::new();
         let mut names = vec![];
 
@@ -198,6 +197,7 @@ impl Mix {
             channel_strips.push(strip);
         }
 
+        // The last strip is the destination strip
         let destination_strip = Strip {
             name: "DEST".to_string(),
             active: false,
@@ -207,14 +207,19 @@ impl Mix {
             min: -96.0,
             max: 10.0,
             balance: 0.0,
-            kind: StripKind::Main,
+            kind: dest_kind,
             number: 0,
         };
 
-        Mix {
-            channel_strips,
-            destination_strip,
-        }
+        channel_strips.push(destination_strip);
+
+        Mix { channel_strips }
+    }
+
+    pub fn get_destination_strip(&self) -> &Strip {
+        self.channel_strips
+            .last()
+            .expect("Channel strips should not be empty")
     }
 }
 

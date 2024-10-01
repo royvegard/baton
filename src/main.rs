@@ -71,21 +71,24 @@ impl App {
         .spacing(0)
         .areas(frame.area());
 
-        let strips_width = strips_area.inner(Margin::new(1, 1)).width;
-
+        // Compose status text
         self.status_line.clear();
+        let active_strip = &self.ps.main_mix.channel_strips[self.active_strip_index];
         self.status_line.push_str(&format!(
-            "{:?} {} - {} ({:>5.1} dB)",
-            self.ps.main_mix.channel_strips[self.active_strip_index].kind,
-            self.ps.main_mix.channel_strips[self.active_strip_index].number,
-            self.ps.main_mix.channel_strips[self.active_strip_index].name,
-            self.ps.main_mix.channel_strips[self.active_strip_index].fader
+            "{:?} {} - {} ({:>5.1} dB) balance: {}, solo: {}, mute: {}",
+            active_strip.kind,
+            active_strip.number,
+            active_strip.name,
+            active_strip.fader,
+            active_strip.balance,
+            active_strip.solo,
+            active_strip.mute
         ));
-
-        self.strip_display_cap = strips_width / (self.strip_width + 1);
-
         let status_line = Line::from(self.status_line.as_str()).left_aligned();
 
+        // Autoscroll left and right
+        let strips_width = strips_area.inner(Margin::new(1, 1)).width;
+        self.strip_display_cap = strips_width / (self.strip_width + 1);
         while self.active_strip_index < self.first_strip_index {
             self.first_strip_index -= 1;
         }
@@ -95,10 +98,7 @@ impl App {
         }
 
         frame.render_widget("Mixer".bold().into_centered_line(), title_area);
-        frame.render_widget(
-            self.vertical_barchart(&self.ps.main_mix.channel_strips),
-            strips_area,
-        );
+        frame.render_widget(self.vertical_barchart(&self.ps.main_mix), strips_area);
         frame.render_widget(
             Paragraph::new(status_line).block(Block::bordered().title("Status")),
             status_area,
@@ -174,7 +174,7 @@ impl App {
                 self.ps.command.input_strip = self.active_strip_index as u32;
                 self.ps.command.mode = usb::MODE_CHANNEL_STRIP;
 
-                self.ps.command.output_strip = self.ps.main_mix.destination_strip.number;
+                self.ps.command.output_strip = self.ps.main_mix.get_destination_strip().number;
                 self.ps.command.output_channel = usb::LEFT;
                 self.ps.send_command();
                 self.ps.command.output_channel = usb::RIGHT;
@@ -199,8 +199,9 @@ impl App {
         self.strip_width = w;
     }
 
-    fn vertical_barchart(&self, strips: &[usb::Strip]) -> BarChart {
-        let bars: Vec<Bar> = strips
+    fn vertical_barchart(&self, mix: &usb::Mix) -> BarChart {
+        let bars: Vec<Bar> = mix
+            .channel_strips
             .iter()
             .map(|strip| self.vertical_bar(strip))
             .collect();
