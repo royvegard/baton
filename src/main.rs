@@ -78,14 +78,15 @@ impl App {
         let active_strip =
             &self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
         self.status_line.push_str(&format!(
-            "{:?} {} - {} ({:>5.1} dB) balance: {}, solo: {}, mute: {}",
+            "{:?} {} - {} ({:>5.1} dB) balance: {}, solo: {}, mute: {}, mute_by_solo: {}",
             active_strip.kind,
             active_strip.number,
             active_strip.name,
             active_strip.fader,
             active_strip.balance,
             active_strip.solo,
-            active_strip.mute
+            active_strip.mute,
+            active_strip.mute_by_solo,
         ));
         let status_line = Line::from(self.status_line.as_str()).left_aligned();
 
@@ -136,6 +137,8 @@ impl App {
             KeyCode::Char('6') => self.set_active_mix(5),
             KeyCode::Char('7') => self.set_active_mix(6),
             KeyCode::Char('8') => self.set_active_mix(7),
+            KeyCode::Char('m') => self.toggle_mute(),
+            KeyCode::Char('s') => self.toggle_solo(),
             KeyCode::Down => {
                 if key_event.modifiers == KeyModifiers::SHIFT {
                     self.increment_fader(-0.1);
@@ -250,6 +253,101 @@ impl App {
         self.ps.set_main_mono(!self.ps.main_mono);
     }
 
+    fn toggle_mute(&mut self) {
+        if let usb::StripKind::Channel =
+            self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].kind
+        {
+            self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].mute =
+                !self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].mute;
+
+            let dest_strip = self.ps.mixes[self.active_mix_index]
+                .get_destination_strip()
+                .number;
+            let s =
+                &mut self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
+
+            self.ps.command.input_strip = self.active_strip_index as u32;
+            if s.mute | s.mute_by_solo {
+                self.ps.command.value = usb::MUTED;
+            } else {
+                self.ps.command.set_db(s.fader);
+            }
+            if s.solo {
+                self.ps.command.set_db(s.fader);
+            }
+            self.ps.command.mode = usb::MODE_CHANNEL_STRIP;
+            self.ps.command.output_strip = dest_strip;
+            self.ps.command.output_channel = usb::LEFT;
+            self.ps.send_command();
+            self.ps.command.output_channel = usb::RIGHT;
+            self.ps.send_command();
+        }
+    }
+
+    fn toggle_solo(&mut self) {
+        if let usb::StripKind::Channel =
+            self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].kind
+        {
+            self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].solo =
+                !self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].solo;
+
+            let length = self.ps.mixes[self.active_mix_index].channel_strips.len() - 1;
+            let dest_strip = self.ps.mixes[self.active_mix_index]
+                .get_destination_strip()
+                .number;
+
+            let mut solo_exists = false;
+            for s in self.ps.mixes[self.active_mix_index]
+                .channel_strips
+                .iter()
+                .take(length)
+            {
+                if s.solo {
+                    solo_exists = true;
+                }
+            }
+
+            if solo_exists {
+                for i in 0..length {
+                    let s = &mut self.ps.mixes[self.active_mix_index].channel_strips[i];
+                    s.mute_by_solo = !s.solo;
+
+                    self.ps.command.input_strip = i as u32;
+                    if s.mute | s.mute_by_solo {
+                        self.ps.command.value = usb::MUTED;
+                    }
+                    if s.solo {
+                        self.ps.command.set_db(s.fader);
+                    }
+                    self.ps.command.mode = usb::MODE_CHANNEL_STRIP;
+                    self.ps.command.output_strip = dest_strip;
+                    self.ps.command.output_channel = usb::LEFT;
+                    self.ps.send_command();
+                    self.ps.command.output_channel = usb::RIGHT;
+                    self.ps.send_command();
+                }
+            } else {
+                for i in 0..length {
+                    let s = &mut self.ps.mixes[self.active_mix_index].channel_strips[i];
+                    s.mute_by_solo = false;
+
+                    self.ps.command.input_strip = i as u32;
+                    if !s.mute & !s.mute_by_solo {
+                        self.ps.command.set_db(s.fader);
+                    } else {
+                        self.ps.command.value = usb::MUTED;
+                    }
+                    self.ps.command.mode = usb::MODE_CHANNEL_STRIP;
+                    self.ps.command.output_strip = dest_strip;
+                    self.ps.command.output_channel = usb::LEFT;
+                    self.ps.send_command();
+                    self.ps.command.output_channel = usb::RIGHT;
+                    self.ps.send_command();
+                }
+            }
+        }
+    }
+
     fn set_active_mix(&mut self, index: usize) {
         self.active_mix_index = index;
         self.set_active_strip(self.active_strip_index as isize);
@@ -284,7 +382,7 @@ impl App {
         let value: u64 = (c + ((d - c) / (b - a)) * (t - a)) as u64;
 
         let mut fg_color: Color;
-        let bg_color = Color::DarkGray;
+        let mut bg_color = Color::DarkGray;
 
         match strip.kind {
             usb::StripKind::Channel => {
@@ -299,6 +397,12 @@ impl App {
         }
         if strip.active {
             fg_color = Color::Green;
+        }
+        if strip.mute | strip.mute_by_solo {
+            bg_color = Color::Red;
+        }
+        if strip.solo {
+            bg_color = Color::Yellow;
         }
 
         let style = Style::new().fg(fg_color).bg(bg_color);

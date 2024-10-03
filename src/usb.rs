@@ -24,8 +24,8 @@ pub(crate) const LEFT: u32 = 0x00;
 pub(crate) const RIGHT: u32 = 0x01;
 
 // Fader presets
-const MUTED: u32 = 0x00;
-const UNITY: u32 = 0xbc000000;
+pub(crate) const MUTED: u32 = 0x00;
+pub(crate) const UNITY: u32 = 0xbc000000;
 
 pub struct PreSonusStudio1824c {
     pub device: Device,
@@ -135,7 +135,7 @@ pub struct Command {
     fix2: u32,
     pub output_strip: u32,
     pub output_channel: u32,
-    value: u32,
+    pub value: u32,
 }
 
 impl Command {
@@ -218,6 +218,7 @@ pub struct Strip {
     pub balance: f64,
     pub solo: bool,
     pub mute: bool,
+    pub mute_by_solo: bool,
     pub max: f64,
     pub min: f64,
     pub active: bool,
@@ -259,6 +260,7 @@ impl Mix {
                 fader: 0.0,
                 solo: false,
                 mute: false,
+                mute_by_solo: false,
                 min: -96.0,
                 max: 10.0,
                 balance: 0.0,
@@ -276,6 +278,7 @@ impl Mix {
             fader: 0.0,
             solo: false,
             mute: false,
+            mute_by_solo: false,
             min: -96.0,
             max: 10.0,
             balance: 0.0,
