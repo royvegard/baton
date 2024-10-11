@@ -2,7 +2,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use ratatui::{
     layout::{Constraint, Layout, Margin},
     style::{Color, Style, Stylize},
-    text::Line,
+    text::{Line, Span},
     widgets::{Bar, BarChart, BarGroup, Block, Paragraph},
     DefaultTerminal, Frame,
 };
@@ -81,11 +81,11 @@ impl App {
 
     fn on_tick(&mut self) {
         self.ps.poll_state();
-        // do something
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        let [title_area, strips_area, status_area] = Layout::vertical([
+        let [title_area, state_area, strips_area, status_area] = Layout::vertical([
+            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Fill(1),
             Constraint::Length(3),
@@ -122,7 +122,48 @@ impl App {
             self.first_strip_index += 1;
         }
 
+        // Compose state text
+        let spacer = Span::from("|").reset();
+        let mut phantom: Span = Span::from(" 48V ");
+        if self.ps.state.phantom == 0x01 {
+            phantom = phantom.style(Style::new().bold().black().on_blue());
+        } else {
+            phantom = phantom.style(Style::new().reset());
+        }
+
+        let mut line: Span = Span::from(" 1-2 Line ");
+        if self.ps.state.line == 0x01 {
+            line = line.style(Style::new().bold().black().on_blue());
+        } else {
+            line = line.style(Style::new().reset());
+        }
+
+        let mut mute: Span = Span::from(" Mute ");
+        if self.ps.state.mute == 0x01 {
+            mute = mute.style(Style::new().bold().black().on_red());
+        } else {
+            mute = mute.style(Style::new().reset());
+        }
+
+        let mut mono: Span = Span::from(" Mono ");
+        if self.ps.state.mono == 0x01 {
+            mono = mono.style(Style::new().bold().black().on_yellow());
+        } else {
+            mono = mono.style(Style::new().reset());
+        }
+
+        let state_line = Line::from(vec![
+            phantom,
+            spacer.clone(),
+            line,
+            spacer.clone(),
+            mute,
+            spacer,
+            mono,
+        ]);
+
         frame.render_widget("Mixer".bold().into_centered_line(), title_area);
+        frame.render_widget(state_line, state_area);
         frame.render_widget(
             self.vertical_barchart(&self.ps.mixes[self.active_mix_index]),
             strips_area,
@@ -396,7 +437,7 @@ impl App {
     fn vertical_bar(&self, strip: &usb::Strip) -> Bar {
         let a = strip.min;
         let b = strip.max;
-        let c = 4.0;
+        let c = 20.0;
         let d = 500.0;
         let t = strip.fader;
 

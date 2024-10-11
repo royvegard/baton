@@ -132,7 +132,13 @@ impl PreSonusStudio1824c {
         let dat = self.state.poll_usb_data(&self.device);
 
         if let Ok(d) = dat {
-            self.state.read_slice(d)
+            self.state.read_slice(d);
+
+            // synch button states
+            self.phantom_power = self.state.phantom == 0x01;
+            self.in_1_2_line = self.state.line == 0x01;
+            self.main_mute = self.state.mute == 0x01;
+            self.main_mono = self.state.mono == 0x01;
         }
     }
 }
@@ -322,10 +328,10 @@ pub struct State {
     right: [u32; 8],
     d3: u32,
     d4: u32,
-    phantom: u32,
-    line: u32,
-    mute: u32,
-    mono: u32,
+    pub phantom: u32,
+    pub line: u32,
+    pub mute: u32,
+    pub mono: u32,
     d5: u32,
 }
 
