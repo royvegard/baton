@@ -7,6 +7,8 @@ use ratatui::{
     DefaultTerminal, Frame,
 };
 use std::io;
+use std::time::{Duration, Instant};
+use usb::State;
 
 mod usb;
 
@@ -26,6 +28,7 @@ pub struct App {
     strip_display_cap: u16,
     status_line: String,
     ps: usb::PreSonusStudio1824c,
+    last_tick: Instant,
 }
 
 impl App {
@@ -39,6 +42,7 @@ impl App {
             strip_display_cap: 1,
             status_line: String::with_capacity(256),
             ps: usb::PreSonusStudio1824c::new().expect("Failed to open device"),
+            last_tick: Instant::now(),
         };
 
         app.set_active_strip(app.active_strip_index as isize);
@@ -57,11 +61,27 @@ impl App {
 
     /// runs the application's main loop until the user quits
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
+        let tick_rate = Duration::from_millis(100);
+        self.last_tick = Instant::now();
+
         while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
-            self.handle_events()?;
+            let timeout = tick_rate.saturating_sub(self.last_tick.elapsed());
+            if event::poll(timeout)? {
+                self.handle_events()?;
+            }
+
+            if self.last_tick.elapsed() >= tick_rate {
+                self.on_tick();
+                self.last_tick = Instant::now();
+            }
         }
         Ok(())
+    }
+
+    fn on_tick(&mut self) {
+        self.ps.poll_state();
+        // do something
     }
 
     fn draw(&mut self, frame: &mut Frame) {
@@ -78,7 +98,7 @@ impl App {
         let active_strip =
             &self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
         self.status_line.push_str(&format!(
-            "{:?} {} - {} ({:>5.1} dB) balance: {}, solo: {}, mute: {}, mute_by_solo: {}",
+            "{:?} {} - {} ({:>5.1} dB) balance: {}, solo: {}, mute: {}, mute_by_solo: {}, daw0: {:>.3}",
             active_strip.kind,
             active_strip.number,
             active_strip.name,
@@ -87,6 +107,7 @@ impl App {
             active_strip.solo,
             active_strip.mute,
             active_strip.mute_by_solo,
+            State::get_db(self.ps.state.daw[0]),
         ));
         let status_line = Line::from(self.status_line.as_str()).left_aligned();
 

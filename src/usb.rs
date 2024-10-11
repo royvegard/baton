@@ -1,6 +1,6 @@
 use futures_lite::future::block_on;
 use nusb::{
-    transfer::{ControlOut, ControlType, Recipient, ResponseBuffer, TransferError},
+    transfer::{ControlIn, ControlOut, ControlType, Recipient, ResponseBuffer, TransferError},
     Device,
 };
 use std::{
@@ -30,6 +30,7 @@ pub(crate) const UNITY: u32 = 0xbc000000;
 pub struct PreSonusStudio1824c {
     pub device: Device,
     pub command: Command,
+    pub state: State,
     pub mixes: Vec<Mix>,
     // TODO: These states can be read from device
     pub in_1_2_line: bool,
@@ -57,6 +58,7 @@ impl PreSonusStudio1824c {
         Ok(PreSonusStudio1824c {
             device,
             command: Command::new(),
+            state: State::new(),
             mixes: vec![
                 Mix::new(String::from("MAIN 1-2"), StripKind::Main, 4),
                 Mix::new(String::from("MIX 3-4"), StripKind::Bus, 1),
@@ -124,6 +126,14 @@ impl PreSonusStudio1824c {
 
     pub fn send_command(&self) {
         let _ = self.command.send_usb_command(&self.device);
+    }
+
+    pub fn poll_state(&mut self) {
+        let dat = self.state.poll_usb_data(&self.device);
+
+        if let Ok(d) = dat {
+            self.state.read_slice(d)
+        }
     }
 }
 
@@ -295,6 +305,211 @@ impl Mix {
         self.channel_strips
             .last()
             .expect("Channel strips should not be empty")
+    }
+}
+
+pub struct State {
+    counter: u16,
+    d1: u32,
+    d2: u32,
+    fix1: u32,
+    fix2: u32,
+    mic: [u32; 8],
+    spdif: [u32; 2],
+    adat: [u32; 8],
+    pub daw: [u32; 18],
+    left: [u32; 8],
+    right: [u32; 8],
+    d3: u32,
+    d4: u32,
+    phantom: u32,
+    line: u32,
+    mute: u32,
+    mono: u32,
+    d5: u32,
+}
+
+impl State {
+    fn new() -> Self {
+        State {
+            counter: 0x01,
+            d1: 0x00,
+            d2: 0x00,
+            fix1: 0x64656d73,
+            fix2: 0xf4,
+            mic: [0x00; 8],
+            spdif: [0x00; 2],
+            adat: [0x00; 8],
+            daw: [0x00; 18],
+            left: [0x00; 8],
+            right: [0x00; 8],
+            d3: 0x00,
+            d4: 0x00,
+            phantom: 0x00,
+            line: 0x00,
+            mute: 0x00,
+            mono: 0x00,
+            d5: 0x00,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.counter = 0x01;
+        self.d1 = 0x00;
+        self.d2 = 0x00;
+        self.fix1 = 0x64656d73;
+        self.fix2 = 0xf4;
+        self.mic = [0x00; 8];
+        self.spdif = [0x00; 2];
+        self.adat = [0x00; 8];
+        self.daw = [0x00; 18];
+        self.left = [0x00; 8];
+        self.right = [0x00; 8];
+        self.d3 = 0x00;
+        self.d4 = 0x00;
+        self.phantom = 0x00;
+        self.line = 0x00;
+        self.mute = 0x00;
+        self.mono = 0x00;
+        self.d5 = 0x00;
+    }
+
+    pub fn as_array(&self) -> [u8; 252] {
+        let mut arr = [0u8; 252];
+        let mut i = 0;
+
+        for b in self.d1.to_le_bytes() {
+            arr[i] = b;
+            i += 1;
+        }
+        for b in self.d2.to_le_bytes() {
+            arr[i] = b;
+            i += 1;
+        }
+        for b in self.fix1.to_le_bytes() {
+            arr[i] = b;
+            i += 1;
+        }
+        for b in self.fix2.to_le_bytes() {
+            arr[i] = b;
+            i += 1;
+        }
+        for m in self.mic {
+            for b in m.to_le_bytes() {
+                arr[i] = b;
+                i += 1;
+            }
+        }
+        for m in self.spdif {
+            for b in m.to_le_bytes() {
+                arr[i] = b;
+                i += 1;
+            }
+        }
+        for m in self.adat {
+            for b in m.to_le_bytes() {
+                arr[i] = b;
+                i += 1;
+            }
+        }
+        for m in self.daw {
+            for b in m.to_le_bytes() {
+                arr[i] = b;
+                i += 1;
+            }
+        }
+        for m in self.left {
+            for b in m.to_le_bytes() {
+                arr[i] = b;
+                i += 1;
+            }
+        }
+        for m in self.right {
+            for b in m.to_le_bytes() {
+                arr[i] = b;
+                i += 1;
+            }
+        }
+        for b in self.d3.to_le_bytes() {
+            arr[i] = b;
+            i += 1;
+        }
+        for b in self.d4.to_le_bytes() {
+            arr[i] = b;
+            i += 1;
+        }
+        for b in self.phantom.to_le_bytes() {
+            arr[i] = b;
+            i += 1;
+        }
+        for b in self.line.to_le_bytes() {
+            arr[i] = b;
+            i += 1;
+        }
+        for b in self.mute.to_le_bytes() {
+            arr[i] = b;
+            i += 1;
+        }
+        for b in self.mono.to_le_bytes() {
+            arr[i] = b;
+            i += 1;
+        }
+        for b in self.d5.to_le_bytes() {
+            arr[i] = b;
+            i += 1;
+        }
+
+        arr
+    }
+
+    pub fn read_slice(&mut self, slice: Vec<u8>) {
+        let mut daw0 = slice[0x58] as u32;
+        daw0 += slice[0x59] as u32 * 0x100;
+        daw0 += slice[0x5a] as u32 * 0x100 * 0x100;
+        daw0 += slice[0x5b] as u32 * 0x100 * 0x100 * 0x100;
+
+        self.daw[0] = daw0;
+
+        self.phantom = slice[0xe8] as u32;
+        self.line = slice[0xec] as u32;
+        self.mute = slice[0xf0] as u32;
+        self.mono = slice[0xf4] as u32;
+    }
+
+    pub fn get_db(input: u32) -> f64 {
+        const ZERO_DBFS: u32 = 0x7fffff00;
+        20.0 * (input as f64 / ZERO_DBFS as f64).log10()
+    }
+
+    pub fn poll_usb_data(&mut self, device: &Device) -> Result<Vec<u8>, TransferError> {
+        self.reset();
+
+        let control: ControlOut = ControlOut {
+            control_type: ControlType::Vendor,
+            recipient: Recipient::Device,
+            request: 161,
+            value: self.counter.to_le(),
+            index: 0,
+            data: &self.as_array(),
+        };
+
+        let _ = block_on(device.control_out(control)).into_result();
+
+        let control: ControlIn = ControlIn {
+            control_type: ControlType::Vendor,
+            recipient: Recipient::Device,
+            request: 162,
+            value: self.counter.to_le(),
+            index: 0,
+            length: self.as_array().len() as u16,
+        };
+
+        if self.counter == 0xffff {
+            self.counter = 0x00;
+        }
+        self.counter += 1;
+
+        block_on(device.control_in(control)).into_result()
     }
 }
 
