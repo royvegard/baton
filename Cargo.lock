@@ -33,6 +33,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 
 [[package]]
+name = "baton"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "futures-lite",
+ "nusb",
+ "ratatui",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -532,16 +542,6 @@ name = "unicode-width"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
-
-[[package]]
-name = "usb_test"
-version = "0.1.0"
-dependencies = [
- "crossterm",
- "futures-lite",
- "nusb",
- "ratatui",
-]
 
 [[package]]
 name = "version_check"
