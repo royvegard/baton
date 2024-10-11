@@ -296,22 +296,18 @@ impl App {
     }
 
     fn toggle_phantom_power(&mut self) {
-        // TODO: State can be read from device
         self.ps.set_phantom_power(!self.ps.phantom_power);
     }
 
     fn toggle_1_2_line(&mut self) {
-        // TODO: State can be read from device
         self.ps.set_1_2_line(!self.ps.in_1_2_line);
     }
 
     fn toggle_main_mute(&mut self) {
-        // TODO: State can be read from device
         self.ps.set_main_mute(!self.ps.main_mute);
     }
 
     fn toggle_main_mono(&mut self) {
-        // TODO: State can be read from device
         self.ps.set_main_mono(!self.ps.main_mono);
     }
 

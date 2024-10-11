@@ -32,7 +32,6 @@ pub struct PreSonusStudio1824c {
     pub command: Command,
     pub state: State,
     pub mixes: Vec<Mix>,
-    // TODO: These states can be read from device
     pub in_1_2_line: bool,
     pub main_mute: bool,
     pub main_mono: bool,
