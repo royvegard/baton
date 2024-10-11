@@ -227,6 +227,10 @@ pub enum StripKind {
     Main,
 }
 
+pub enum PanRule {
+    Simple,
+}
+
 pub struct Strip {
     pub name: String,
     pub fader: f64,
@@ -244,6 +248,23 @@ pub struct Strip {
 impl Strip {
     pub fn set_fader(&mut self, value: f64) {
         self.fader = value.clamp(self.min, self.max);
+    }
+
+    pub fn pan_rule(&self, rule: PanRule) -> (f64, f64) {
+        let mut left = self.fader;
+        let mut right = self.fader;
+
+        match rule {
+            PanRule::Simple => {
+                if self.balance < 0.0 {
+                    right -= self.balance.abs();
+                } else if self.balance > 0.0 {
+                    left -= self.balance.abs();
+                }
+            }
+        }
+
+        (left, right)
     }
 }
 

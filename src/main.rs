@@ -201,6 +201,21 @@ impl App {
             KeyCode::Char('8') => self.set_active_mix(7),
             KeyCode::Char('m') => self.toggle_mute(),
             KeyCode::Char('s') => self.toggle_solo(),
+            KeyCode::Char('x') => {
+                if key_event.modifiers == KeyModifiers::CONTROL {
+                    self.increment_balance(-10.0);
+                } else {
+                    self.increment_balance(-1.0);
+                }
+            }
+            KeyCode::Char('c') => self.center_balance(),
+            KeyCode::Char('v') => {
+                if key_event.modifiers == KeyModifiers::CONTROL {
+                    self.increment_balance(10.0);
+                } else {
+                    self.increment_balance(1.0);
+                }
+            }
             KeyCode::Down => {
                 if key_event.modifiers == KeyModifiers::SHIFT {
                     self.increment_fader(-0.1);
@@ -246,9 +261,15 @@ impl App {
             &mut self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
         let current = strip.fader;
         strip.set_fader(current + delta);
+        self.write_active_fader();
+    }
 
-        self.ps.command.set_db(strip.fader);
+    fn write_active_fader(&mut self) {
+        let strip =
+            &mut self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
 
+        let fader = strip.fader;
+        let (left, right) = strip.pan_rule(usb::PanRule::Simple);
         match strip.kind {
             usb::StripKind::Main | usb::StripKind::Bus => {
                 self.ps.command.input_strip = self.ps.mixes[self.active_mix_index]
@@ -256,9 +277,9 @@ impl App {
                     .number;
                 self.ps.command.mode = usb::MODE_BUS_STRIP;
                 self.ps.command.output_strip = 0x00;
+
                 self.ps.command.output_channel = usb::LEFT;
-                self.ps.send_command();
-                self.ps.command.output_channel = usb::RIGHT;
+                self.ps.command.set_db(fader);
                 self.ps.send_command();
             }
             usb::StripKind::Channel => {
@@ -266,16 +287,20 @@ impl App {
                 self.ps.command.input_strip = self.active_strip_index as u32;
                 self.ps.command.mode = usb::MODE_CHANNEL_STRIP;
                 self.ps.command.output_strip = output_strip.number;
+
                 self.ps.command.output_channel = usb::LEFT;
+                self.ps.command.set_db(left);
                 self.ps.send_command();
+
                 self.ps.command.output_channel = usb::RIGHT;
+                self.ps.command.set_db(right);
                 self.ps.send_command();
 
                 if let usb::StripKind::Main = output_strip.kind {
                     self.ps.command.output_strip = 0;
+
                     self.ps.command.output_channel = usb::LEFT;
-                    self.ps.send_command();
-                    self.ps.command.output_channel = usb::RIGHT;
+                    self.ps.command.set_db(fader);
                     self.ps.send_command();
                 }
             }
@@ -293,6 +318,22 @@ impl App {
     fn increment_strip_width(&mut self, delta: i16) {
         let w = ((self.strip_width as i16 + delta).clamp(1, 15)) as u16;
         self.strip_width = w;
+    }
+
+    fn increment_balance(&mut self, delta: f64) {
+        let strip =
+            &mut self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
+        strip.balance = (strip.balance + delta).clamp(-100.0, 100.0);
+
+        self.write_active_fader();
+    }
+
+    fn center_balance(&mut self) {
+        let strip =
+            &mut self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
+        strip.balance = 0.0;
+
+        self.write_active_fader();
     }
 
     fn toggle_phantom_power(&mut self) {
