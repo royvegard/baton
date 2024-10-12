@@ -480,35 +480,43 @@ impl App {
 
         let value: u64 = (c + ((d - c) / (b - a)) * (t - a)) as u64;
 
-        let mut fg_color: Color;
-        let mut bg_color = Color::DarkGray;
+        let mut strip_fg_color: Color;
+        let mut label_fg_color = Color::White;
+        let strip_bg_color = Color::DarkGray;
+        let mut label_bg_color = Color::Reset;
 
         match strip.kind {
             usb::StripKind::Channel => {
-                fg_color = Color::White;
+                strip_fg_color = Color::White;
             }
             usb::StripKind::Bus => {
-                fg_color = Color::Yellow;
+                strip_fg_color = Color::Yellow;
             }
             usb::StripKind::Main => {
-                fg_color = Color::LightBlue;
+                strip_fg_color = Color::LightBlue;
             }
         }
         if strip.active {
-            fg_color = Color::Green;
+            strip_fg_color = Color::Green;
         }
         if strip.mute | strip.mute_by_solo {
-            bg_color = Color::Red;
+            label_bg_color = Color::Red;
+            label_fg_color = Color::Black;
         }
         if strip.solo {
-            bg_color = Color::Yellow;
+            label_bg_color = Color::Yellow;
+            label_fg_color = Color::Black;
         }
 
-        let style = Style::new().fg(fg_color).bg(bg_color);
+        let style = Style::new().fg(strip_fg_color).bg(strip_bg_color);
 
         Bar::default()
             .value(value)
-            .label(Line::from(strip.name.to_string()))
+            .label(
+                Line::from(strip.name.to_string())
+                    .fg(label_fg_color)
+                    .bg(label_bg_color),
+            )
             .text_value(format!("{0:>5.1}", strip.fader))
             .style(style)
     }
