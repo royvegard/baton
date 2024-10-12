@@ -59,7 +59,7 @@ impl PreSonusStudio1824c {
             command: Command::new(),
             state: State::new(),
             mixes: vec![
-                Mix::new(String::from("MAIN 1-2"), StripKind::Main, 4),
+                Mix::new(String::from("MAIN 1-2"), StripKind::Main, 0),
                 Mix::new(String::from("MIX 3-4"), StripKind::Bus, 1),
                 Mix::new(String::from("MIX 5-6"), StripKind::Bus, 2),
                 Mix::new(String::from("MIX 7-8"), StripKind::Bus, 3),

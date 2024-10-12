@@ -305,24 +305,6 @@ impl App {
                     self.ps.command.value = usb::MUTED;
                 }
                 self.ps.send_command();
-
-                if let usb::StripKind::Main = output_bus.kind {
-                    self.ps.command.output_bus = 0;
-
-                    self.ps.command.output_channel = usb::LEFT;
-                    self.ps.command.set_db(left);
-                    if muted & !soloed {
-                        self.ps.command.value = usb::MUTED;
-                    }
-                    self.ps.send_command();
-
-                    self.ps.command.output_channel = usb::RIGHT;
-                    self.ps.command.set_db(right);
-                    if muted & !soloed {
-                        self.ps.command.value = usb::MUTED;
-                    }
-                    self.ps.send_command();
-                }
             }
         }
     }
