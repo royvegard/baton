@@ -79,7 +79,7 @@ impl PreSonusStudio1824c {
         let b: u32 = if on { 0x01 } else { 0x00 };
         self.command.mode = MODE_BUTTON;
         self.command.input_strip = 0x00;
-        self.command.output_strip = 0x00;
+        self.command.output_bus = 0x00;
         self.command.output_channel = BUTTON_1_2_LINE;
         self.command.value = b;
 
@@ -91,7 +91,7 @@ impl PreSonusStudio1824c {
         let b: u32 = if on { 0x01 } else { 0x00 };
         self.command.mode = MODE_BUTTON;
         self.command.input_strip = 0x00;
-        self.command.output_strip = 0x00;
+        self.command.output_bus = 0x00;
         self.command.output_channel = BUTTON_MAIN_MUTE;
         self.command.value = b;
 
@@ -103,7 +103,7 @@ impl PreSonusStudio1824c {
         let b: u32 = if on { 0x01 } else { 0x00 };
         self.command.mode = MODE_BUTTON;
         self.command.input_strip = 0x00;
-        self.command.output_strip = 0x00;
+        self.command.output_bus = 0x00;
         self.command.output_channel = BUTTON_MAIN_MONO;
         self.command.value = b;
 
@@ -115,7 +115,7 @@ impl PreSonusStudio1824c {
         let b: u32 = if on { 0x01 } else { 0x00 };
         self.command.mode = MODE_BUTTON;
         self.command.input_strip = 0x00;
-        self.command.output_strip = 0x00;
+        self.command.output_bus = 0x00;
         self.command.output_channel = BUTTON_PHANTOM_POWER;
         self.command.value = b;
 
@@ -148,7 +148,7 @@ pub struct Command {
     pub input_strip: u32,
     fix1: u32,
     fix2: u32,
-    pub output_strip: u32,
+    pub output_bus: u32,
     pub output_channel: u32,
     pub value: u32,
 }
@@ -160,7 +160,7 @@ impl Command {
             input_strip: 0x00,
             fix1: 0x50617269,
             fix2: 0x14,
-            output_strip: 0x04,
+            output_bus: 0x04,
             output_channel: LEFT,
             value: 0x00000000,
         }
@@ -186,7 +186,7 @@ impl Command {
             arr[i] = b;
             i += 1;
         }
-        for b in self.output_strip.to_le_bytes() {
+        for b in self.output_bus.to_le_bytes() {
             arr[i] = b;
             i += 1;
         }
@@ -581,7 +581,7 @@ mod tests {
         fader.value = 12677158;
         fader.set_db(0.651678);
         fader.input_strip = 0x22;
-        fader.output_strip = 0x04;
+        fader.output_bus = 0x04;
         fader.output_channel = RIGHT;
         assert_eq!(fader.as_array(), a);
     }

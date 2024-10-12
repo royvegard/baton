@@ -277,7 +277,7 @@ impl App {
                     .get_destination_strip()
                     .number;
                 self.ps.command.mode = usb::MODE_BUS_STRIP;
-                self.ps.command.output_strip = 0x00;
+                self.ps.command.output_bus = 0x00;
 
                 self.ps.command.output_channel = usb::LEFT;
                 self.ps.command.set_db(fader);
@@ -287,10 +287,10 @@ impl App {
                 self.ps.send_command();
             }
             usb::StripKind::Channel => {
-                let output_strip = self.ps.mixes[self.active_mix_index].get_destination_strip();
+                let output_bus = self.ps.mixes[self.active_mix_index].get_destination_strip();
                 self.ps.command.input_strip = self.active_strip_index as u32;
                 self.ps.command.mode = usb::MODE_CHANNEL_STRIP;
-                self.ps.command.output_strip = output_strip.number;
+                self.ps.command.output_bus = output_bus.number;
 
                 self.ps.command.output_channel = usb::LEFT;
                 self.ps.command.set_db(left);
@@ -306,8 +306,8 @@ impl App {
                 }
                 self.ps.send_command();
 
-                if let usb::StripKind::Main = output_strip.kind {
-                    self.ps.command.output_strip = 0;
+                if let usb::StripKind::Main = output_bus.kind {
+                    self.ps.command.output_bus = 0;
 
                     self.ps.command.output_channel = usb::LEFT;
                     self.ps.command.set_db(left);
@@ -395,7 +395,7 @@ impl App {
                 !self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].solo;
 
             let length = self.ps.mixes[self.active_mix_index].channel_strips.len() - 1;
-            let dest_strip = self.ps.mixes[self.active_mix_index]
+            let dest_bus = self.ps.mixes[self.active_mix_index]
                 .get_destination_strip()
                 .number;
 
@@ -423,7 +423,7 @@ impl App {
                         self.ps.command.set_db(s.fader);
                     }
                     self.ps.command.mode = usb::MODE_CHANNEL_STRIP;
-                    self.ps.command.output_strip = dest_strip;
+                    self.ps.command.output_bus = dest_bus;
                     self.ps.command.output_channel = usb::LEFT;
                     self.ps.send_command();
                     self.ps.command.output_channel = usb::RIGHT;
@@ -441,7 +441,7 @@ impl App {
                         self.ps.command.value = usb::MUTED;
                     }
                     self.ps.command.mode = usb::MODE_CHANNEL_STRIP;
-                    self.ps.command.output_strip = dest_strip;
+                    self.ps.command.output_bus = dest_bus;
                     self.ps.command.output_channel = usb::LEFT;
                     self.ps.send_command();
                     self.ps.command.output_channel = usb::RIGHT;
