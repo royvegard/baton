@@ -8,7 +8,7 @@ use ratatui::{
 };
 use std::io;
 use std::time::{Duration, Instant};
-use usb::State;
+use usb::{State, StripKind};
 
 mod usb;
 
@@ -265,8 +265,9 @@ impl App {
     }
 
     fn write_active_fader(&mut self) {
-        let strip =
-            &mut self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
+        let strip = &self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
+        let muted = strip.mute | strip.mute_by_solo;
+        let soloed = strip.solo;
 
         let fader = strip.fader;
         let (left, right) = strip.pan_rule(usb::PanLaw::Exponential);
@@ -280,6 +281,9 @@ impl App {
 
                 self.ps.command.output_channel = usb::LEFT;
                 self.ps.command.set_db(fader);
+                if muted {
+                    self.ps.command.value = usb::MUTED;
+                }
                 self.ps.send_command();
             }
             usb::StripKind::Channel => {
@@ -290,17 +294,33 @@ impl App {
 
                 self.ps.command.output_channel = usb::LEFT;
                 self.ps.command.set_db(left);
+                if muted & !soloed {
+                    self.ps.command.value = usb::MUTED;
+                }
                 self.ps.send_command();
 
                 self.ps.command.output_channel = usb::RIGHT;
                 self.ps.command.set_db(right);
+                if muted & !soloed {
+                    self.ps.command.value = usb::MUTED;
+                }
                 self.ps.send_command();
 
                 if let usb::StripKind::Main = output_strip.kind {
                     self.ps.command.output_strip = 0;
 
                     self.ps.command.output_channel = usb::LEFT;
-                    self.ps.command.set_db(fader);
+                    self.ps.command.set_db(left);
+                    if muted & !soloed {
+                        self.ps.command.value = usb::MUTED;
+                    }
+                    self.ps.send_command();
+
+                    self.ps.command.output_channel = usb::RIGHT;
+                    self.ps.command.set_db(right);
+                    if muted & !soloed {
+                        self.ps.command.value = usb::MUTED;
+                    }
                     self.ps.send_command();
                 }
             }
@@ -353,33 +373,17 @@ impl App {
     }
 
     fn toggle_mute(&mut self) {
-        if let usb::StripKind::Channel =
-            self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].kind
-        {
-            self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].mute =
-                !self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].mute;
+        match self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].kind {
+            StripKind::Channel | StripKind::Bus => {
+                self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].mute =
+                    !self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index]
+                        .mute;
 
-            let dest_strip = self.ps.mixes[self.active_mix_index]
-                .get_destination_strip()
-                .number;
-            let s =
-                &mut self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
-
-            self.ps.command.input_strip = self.active_strip_index as u32;
-            if s.mute | s.mute_by_solo {
-                self.ps.command.value = usb::MUTED;
-            } else {
-                self.ps.command.set_db(s.fader);
+                self.write_active_fader();
             }
-            if s.solo {
-                self.ps.command.set_db(s.fader);
+            StripKind::Main => {
+                self.toggle_main_mute();
             }
-            self.ps.command.mode = usb::MODE_CHANNEL_STRIP;
-            self.ps.command.output_strip = dest_strip;
-            self.ps.command.output_channel = usb::LEFT;
-            self.ps.send_command();
-            self.ps.command.output_channel = usb::RIGHT;
-            self.ps.send_command();
         }
     }
 
