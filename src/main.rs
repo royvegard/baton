@@ -269,7 +269,7 @@ impl App {
             &mut self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
 
         let fader = strip.fader;
-        let (left, right) = strip.pan_rule(usb::PanRule::Simple);
+        let (left, right) = strip.pan_rule(usb::PanLaw::Exponential);
         match strip.kind {
             usb::StripKind::Main | usb::StripKind::Bus => {
                 self.ps.command.input_strip = self.ps.mixes[self.active_mix_index]

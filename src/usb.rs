@@ -227,8 +227,9 @@ pub enum StripKind {
     Main,
 }
 
-pub enum PanRule {
+pub enum PanLaw {
     Simple,
+    Exponential,
 }
 
 pub struct Strip {
@@ -250,16 +251,25 @@ impl Strip {
         self.fader = value.clamp(self.min, self.max);
     }
 
-    pub fn pan_rule(&self, rule: PanRule) -> (f64, f64) {
+    pub fn pan_rule(&self, rule: PanLaw) -> (f64, f64) {
         let mut left = self.fader;
         let mut right = self.fader;
 
         match rule {
-            PanRule::Simple => {
+            PanLaw::Simple => {
                 if self.balance < 0.0 {
                     right -= self.balance.abs();
                 } else if self.balance > 0.0 {
                     left -= self.balance.abs();
+                }
+            }
+            PanLaw::Exponential => {
+                let value = self.fader - (self.balance.abs().powi(2) / 96.0);
+
+                if self.balance < 0.0 {
+                    right = value;
+                } else if self.balance > 0.0 {
+                    left = value;
                 }
             }
         }
