@@ -392,44 +392,25 @@ impl App {
                 }
             }
 
+            let active_strip_index = self.active_strip_index;
             if solo_exists {
                 for i in 0..length {
                     let s = &mut self.ps.mixes[self.active_mix_index].channel_strips[i];
                     s.mute_by_solo = !s.solo;
 
-                    self.ps.command.input_strip = i as u32;
-                    if s.mute | s.mute_by_solo {
-                        self.ps.command.value = usb::MUTED;
-                    }
-                    if s.solo {
-                        self.ps.command.set_db(s.fader);
-                    }
-                    self.ps.command.mode = usb::MODE_CHANNEL_STRIP;
-                    self.ps.command.output_bus = dest_bus;
-                    self.ps.command.output_channel = usb::LEFT;
-                    self.ps.send_command();
-                    self.ps.command.output_channel = usb::RIGHT;
-                    self.ps.send_command();
+                    self.active_strip_index = i;
+                    self.write_active_fader();
                 }
             } else {
                 for i in 0..length {
                     let s = &mut self.ps.mixes[self.active_mix_index].channel_strips[i];
                     s.mute_by_solo = false;
 
-                    self.ps.command.input_strip = i as u32;
-                    if !s.mute & !s.mute_by_solo {
-                        self.ps.command.set_db(s.fader);
-                    } else {
-                        self.ps.command.value = usb::MUTED;
-                    }
-                    self.ps.command.mode = usb::MODE_CHANNEL_STRIP;
-                    self.ps.command.output_bus = dest_bus;
-                    self.ps.command.output_channel = usb::LEFT;
-                    self.ps.send_command();
-                    self.ps.command.output_channel = usb::RIGHT;
-                    self.ps.send_command();
+                    self.active_strip_index = i;
+                    self.write_active_fader();
                 }
             }
+            self.active_strip_index = active_strip_index;
         }
     }
 
