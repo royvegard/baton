@@ -84,8 +84,7 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        let [title_area, state_area, strips_area, status_area] = Layout::vertical([
-            Constraint::Length(1),
+        let [state_area, strips_area, status_area] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Fill(1),
             Constraint::Length(3),
@@ -162,7 +161,6 @@ impl App {
             mono,
         ]);
 
-        frame.render_widget("Mixer".bold().into_centered_line(), title_area);
         frame.render_widget(state_line, state_area);
         frame.render_widget(
             self.vertical_barchart(&self.ps.mixes[self.active_mix_index]),
@@ -429,7 +427,7 @@ impl App {
             .get_destination_strip()
             .name
             .as_str();
-        let title = Line::from(title).left_aligned().bold();
+        let title = Line::from(title).centered().bold();
 
         BarChart::default()
             .data(BarGroup::default().bars(&bars[self.first_strip_index..]))
