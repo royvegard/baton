@@ -131,7 +131,55 @@ impl PreSonusStudio1824c {
         let dat = self.state.poll_usb_data(&self.device);
 
         if let Ok(d) = dat {
-            self.state.read_slice(d);
+            self.state.read_state(d);
+
+            // synch meters
+            let mut mic = [0.0; 8];
+            let mut adat = [0.0; 8];
+            let mut spdif = [0.0; 2];
+            let mut daw = [0.0; 18];
+            let mut left = [0.0; 8];
+            let mut right = [0.0; 8];
+
+            for (i, v) in mic.iter_mut().enumerate() {
+                *v = State::get_db(self.state.mic[i]);
+            }
+            for (i, v) in adat.iter_mut().enumerate() {
+                *v = State::get_db(self.state.adat[i]);
+            }
+            for (i, v) in spdif.iter_mut().enumerate() {
+                *v = State::get_db(self.state.spdif[i]);
+            }
+            for (i, v) in daw.iter_mut().enumerate() {
+                *v = State::get_db(self.state.daw[i]);
+            }
+            for (i, v) in left.iter_mut().enumerate() {
+                *v = State::get_db(self.state.left[i]);
+            }
+            for (i, v) in right.iter_mut().enumerate() {
+                *v = State::get_db(self.state.right[i]);
+            }
+
+            for m in &mut self.mixes {
+                let mut channel_index = 0;
+
+                for v in mic {
+                    m.channel_strips[channel_index].meter = v;
+                    channel_index += 1;
+                }
+                for v in adat {
+                    m.channel_strips[channel_index].meter = v;
+                    channel_index += 1;
+                }
+                for v in spdif {
+                    m.channel_strips[channel_index].meter = v;
+                    channel_index += 1;
+                }
+                for v in daw {
+                    m.channel_strips[channel_index].meter = v;
+                    channel_index += 1;
+                }
+            }
 
             // synch button states
             self.phantom_power = self.state.phantom == 0x01;
@@ -235,6 +283,7 @@ pub enum PanLaw {
 pub struct Strip {
     pub name: String,
     pub fader: f64,
+    pub meter: f64,
     pub balance: f64,
     pub solo: bool,
     pub mute: bool,
@@ -304,6 +353,7 @@ impl Mix {
                 name: n.to_string(),
                 active: false,
                 fader: 0.0,
+                meter: -f64::INFINITY,
                 solo: false,
                 mute: false,
                 mute_by_solo: false,
@@ -322,6 +372,7 @@ impl Mix {
             name: mix_name,
             active: false,
             fader: 0.0,
+            meter: -f64::INFINITY,
             solo: false,
             mute: false,
             mute_by_solo: false,
@@ -498,13 +549,42 @@ impl State {
         arr
     }
 
-    pub fn read_slice(&mut self, slice: Vec<u8>) {
-        let mut daw0 = slice[0x58] as u32;
-        daw0 += slice[0x59] as u32 * 0x100;
-        daw0 += slice[0x5a] as u32 * 0x100 * 0x100;
-        daw0 += slice[0x5b] as u32 * 0x100 * 0x100 * 0x100;
+    pub fn slice_to_u32(slice: &[u8]) -> u32 {
+        let mut out: u32 = slice[0] as u32;
+        out += slice[1] as u32 * 0x100;
+        out += slice[2] as u32 * 0x100 * 0x100;
+        out += slice[3] as u32 * 0x100 * 0x100 * 0x100;
 
-        self.daw[0] = daw0;
+        out
+    }
+    pub fn read_state(&mut self, slice: Vec<u8>) {
+        const MIC_INDEX: usize = 0x10;
+        const ADAT_INDEX: usize = 0x38;
+        const SPDIF_INDEX: usize = 0x30;
+        const DAW_INDEX: usize = 0x58;
+        const LEFT_INDEX: usize = 0xa0;
+        const RIGHT_INDEX: usize = 0xc0;
+
+        for i in 0..self.mic.len() {
+            self.mic[i] = Self::slice_to_u32(&slice[MIC_INDEX + 4 * i..=MIC_INDEX + 4 * i + 4]);
+        }
+        for i in 0..self.adat.len() {
+            self.adat[i] = Self::slice_to_u32(&slice[ADAT_INDEX + 4 * i..=ADAT_INDEX + 4 * i + 4]);
+        }
+        for i in 0..self.spdif.len() {
+            self.spdif[i] =
+                Self::slice_to_u32(&slice[SPDIF_INDEX + 4 * i..=SPDIF_INDEX + 4 * i + 4]);
+        }
+        for i in 0..self.daw.len() {
+            self.daw[i] = Self::slice_to_u32(&slice[DAW_INDEX + 4 * i..=DAW_INDEX + 4 * i + 4]);
+        }
+        for i in 0..self.left.len() {
+            self.left[i] = Self::slice_to_u32(&slice[LEFT_INDEX + 4 * i..=LEFT_INDEX + 4 * i + 4]);
+        }
+        for i in 0..self.right.len() {
+            self.right[i] =
+                Self::slice_to_u32(&slice[RIGHT_INDEX + 4 * i..=RIGHT_INDEX + 4 * i + 4]);
+        }
 
         self.phantom = slice[0xe8] as u32;
         self.line = slice[0xec] as u32;

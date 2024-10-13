@@ -97,7 +97,7 @@ impl App {
         let active_strip =
             &self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
         self.status_line.push_str(&format!(
-            "{:?} {} - {} ({:>5.1} dB) balance: {}, solo: {}, mute: {}, mute_by_solo: {}, daw0: {:>.3}",
+            "{:?} {} - {} ({:>5.1} dB) balance: {}, solo: {}, mute: {}, mute_by_solo: {}, meter: {:>.3}",
             active_strip.kind,
             active_strip.number,
             active_strip.name,
@@ -106,7 +106,7 @@ impl App {
             active_strip.solo,
             active_strip.mute,
             active_strip.mute_by_solo,
-            State::get_db(self.ps.state.daw[0]),
+            active_strip.meter,
         ));
         let status_line = Line::from(self.status_line.as_str()).left_aligned();
 
@@ -375,9 +375,6 @@ impl App {
                 !self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].solo;
 
             let length = self.ps.mixes[self.active_mix_index].channel_strips.len() - 1;
-            let dest_bus = self.ps.mixes[self.active_mix_index]
-                .get_destination_strip()
-                .number;
 
             let mut solo_exists = false;
             for s in self.ps.mixes[self.active_mix_index]
@@ -421,7 +418,7 @@ impl App {
         let bars: Vec<Bar> = mix
             .channel_strips
             .iter()
-            .map(|strip| self.vertical_bar(strip))
+            .map(|strip| self.fader_bar(strip))
             .collect();
         let title = self.ps.mixes[self.active_mix_index]
             .get_destination_strip()
@@ -436,7 +433,7 @@ impl App {
             .max(500)
     }
 
-    fn vertical_bar(&self, strip: &usb::Strip) -> Bar {
+    fn fader_bar(&self, strip: &usb::Strip) -> Bar {
         let a = strip.min;
         let b = strip.max;
         let c = 20.0;
@@ -464,7 +461,11 @@ impl App {
         if strip.active {
             strip_fg_color = Color::Green;
         }
-        if strip.mute | strip.mute_by_solo {
+        if strip.mute_by_solo {
+            label_bg_color = Color::Reset;
+            label_fg_color = Color::Red;
+        }
+        if strip.mute {
             label_bg_color = Color::Red;
             label_fg_color = Color::Black;
         }
