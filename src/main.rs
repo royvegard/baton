@@ -25,6 +25,8 @@ pub struct App {
     active_strip_index: usize,
     first_strip_index: usize,
     strip_width: u16,
+    meter_heigth: u16,
+    max_height: u16,
     strip_display_cap: u16,
     status_line: String,
     ps: usb::PreSonusStudio1824c,
@@ -39,6 +41,8 @@ impl App {
             active_strip_index: 0,
             first_strip_index: 0,
             strip_width: 5,
+            meter_heigth: 10,
+            max_height: 0,
             strip_display_cap: 1,
             status_line: String::with_capacity(256),
             ps: usb::PreSonusStudio1824c::new().expect("Failed to open device"),
@@ -84,20 +88,23 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        let [state_area, strips_area, status_area] = Layout::vertical([
+        let [state_area, meters_area, strips_area, status_area] = Layout::vertical([
             Constraint::Length(1),
+            Constraint::Percentage(self.meter_heigth),
             Constraint::Fill(1),
             Constraint::Length(3),
         ])
         .spacing(0)
         .areas(frame.area());
 
+        self.max_height = strips_area.height + meters_area.height;
+
         // Compose status text
         self.status_line.clear();
         let active_strip =
             &self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
         self.status_line.push_str(&format!(
-            "{:?} {} - {} ({:>5.1} dB) balance: {}, solo: {}, mute: {}, mute_by_solo: {}, meter: {:>.3}",
+            "{:?} {} - {} ({:>5.1} dB) balance: {}, solo: {}, mute: {}, mute_by_solo: {}, meter: {:>.3}, meter height: {}",
             active_strip.kind,
             active_strip.number,
             active_strip.name,
@@ -107,6 +114,7 @@ impl App {
             active_strip.mute,
             active_strip.mute_by_solo,
             active_strip.meter,
+            self.meter_heigth,
         ));
         let status_line = Line::from(self.status_line.as_str()).left_aligned();
 
@@ -163,7 +171,11 @@ impl App {
 
         frame.render_widget(state_line, state_area);
         frame.render_widget(
-            self.vertical_barchart(&self.ps.mixes[self.active_mix_index]),
+            self.meters_barchart(&self.ps.mixes[self.active_mix_index]),
+            meters_area,
+        );
+        frame.render_widget(
+            self.faders_barchart(&self.ps.mixes[self.active_mix_index]),
             strips_area,
         );
         frame.render_widget(
@@ -199,6 +211,8 @@ impl App {
             KeyCode::Char('8') => self.set_active_mix(7),
             KeyCode::Char('m') => self.toggle_mute(),
             KeyCode::Char('s') => self.toggle_solo(),
+            KeyCode::PageDown => self.increment_meter_heigth(1),
+            KeyCode::PageUp => self.increment_meter_heigth(-1),
             KeyCode::Char('x') => {
                 if key_event.modifiers == KeyModifiers::CONTROL {
                     self.increment_balance(-10.0);
@@ -252,6 +266,11 @@ impl App {
 
     fn exit(&mut self) {
         self.exit = true;
+    }
+
+    fn increment_meter_heigth(&mut self, delta: i16) {
+        let mh = (self.meter_heigth as i16 + delta).clamp(0, 100) as u16;
+        self.meter_heigth = mh;
     }
 
     fn increment_fader(&mut self, delta: f64) {
@@ -414,7 +433,7 @@ impl App {
         self.set_active_strip(self.active_strip_index as isize);
     }
 
-    fn vertical_barchart(&self, mix: &usb::Mix) -> BarChart {
+    fn faders_barchart(&self, mix: &usb::Mix) -> BarChart {
         let bars: Vec<Bar> = mix
             .channel_strips
             .iter()
@@ -484,6 +503,61 @@ impl App {
                     .bg(label_bg_color),
             )
             .text_value(format!("{0:>5.1}", strip.fader))
+            .style(style)
+    }
+
+    fn meters_barchart(&self, mix: &usb::Mix) -> BarChart {
+        let bars: Vec<Bar> = mix
+            .channel_strips
+            .iter()
+            .map(|strip| self.meter_bar(strip))
+            .collect();
+        let title = "Meters";
+        let title = Line::from(title).centered().bold();
+
+        BarChart::default()
+            .data(BarGroup::default().bars(&bars[self.first_strip_index..]))
+            .block(Block::bordered().title(title))
+            .bar_width(self.strip_width)
+            .max(500)
+    }
+    fn meter_bar(&self, strip: &usb::Strip) -> Bar {
+        let a = -40.0;
+        let b = 0.0;
+        let c = 0.0;
+        let d = 500.0;
+        let t = strip.meter;
+
+        let value: u64 = (c + ((d - c) / (b - a)) * (t - a)) as u64;
+
+        let mut strip_fg_color = Color::Rgb(0, 185, 0);
+        let label_fg_color = Color::White;
+        let strip_bg_color = Color::DarkGray;
+        let label_bg_color = Color::Reset;
+
+        if strip.meter > -18.0 {
+            strip_fg_color = Color::Green;
+        }
+        if strip.meter > -9.0 {
+            strip_fg_color = Color::Yellow;
+        }
+        if strip.meter > -3.0 {
+            strip_fg_color = Color::Rgb(255, 165, 0);
+        }
+        if strip.meter > -0.1 {
+            strip_fg_color = Color::Red;
+        }
+
+        let style = Style::new().fg(strip_fg_color).bg(strip_bg_color);
+
+        Bar::default()
+            .value(value)
+            .label(
+                Line::from(strip.name.to_string())
+                    .fg(label_fg_color)
+                    .bg(label_bg_color),
+            )
+            .text_value(format!("{0:>5.1}", strip.meter))
             .style(style)
     }
 }
