@@ -131,7 +131,7 @@ impl PreSonusStudio1824c {
         let dat = self.state.poll_usb_data(&self.device);
 
         if let Ok(d) = dat {
-            self.state.read_state(d);
+            self.state.parse_state(d);
 
             // synch meters
             let mut mic = [0.0; 8];
@@ -327,6 +327,10 @@ impl Strip {
     }
 }
 
+/// A Mix contains several channel strips.
+/// The last strip is the destination or bus strip,
+/// and the preceeding strips are channels
+/// that route to the destination.
 pub struct Mix {
     pub channel_strips: Vec<Strip>,
 }
@@ -401,17 +405,27 @@ pub struct State {
     d2: u32,
     fix1: u32,
     fix2: u32,
+    /// Microphone input meters.
     mic: [u32; 8],
+    /// S/PDIF input meters.
     spdif: [u32; 2],
+    /// ADAT input meters.
     adat: [u32; 8],
-    pub daw: [u32; 18],
+    /// DAW input meters.
+    daw: [u32; 18],
+    /// Input meters for the left channel bus meters
     left: [u32; 8],
+    /// Input meters for the right channel bus meters
     right: [u32; 8],
     d3: u32,
     d4: u32,
+    /// 48V phantom power.
     pub phantom: u32,
+    /// Channel 1-2 line mode.
     pub line: u32,
+    /// Main mix mute.
     pub mute: u32,
+    /// Main mix mono.
     pub mono: u32,
     d5: u32,
 }
@@ -440,6 +454,8 @@ impl State {
         }
     }
 
+    /// Reset all values to zero.
+    /// This is used before requesting state from device.
     fn reset(&mut self) {
         self.counter = 0x01;
         self.d1 = 0x00;
@@ -461,6 +477,7 @@ impl State {
         self.d5 = 0x00;
     }
 
+    /// Return the state as an array of bytes.
     pub fn as_array(&self) -> [u8; 252] {
         let mut arr = [0u8; 252];
         let mut i = 0;
@@ -549,6 +566,7 @@ impl State {
         arr
     }
 
+    /// Convert a slice of 4 bytes to a u32.
     pub fn slice_to_u32(slice: &[u8]) -> u32 {
         let mut out: u32 = slice[0] as u32;
         out += slice[1] as u32 * 0x100;
@@ -557,7 +575,8 @@ impl State {
 
         out
     }
-    pub fn read_state(&mut self, slice: Vec<u8>) {
+
+    pub fn parse_state(&mut self, slice: Vec<u8>) {
         const MIC_INDEX: usize = 0x10;
         const ADAT_INDEX: usize = 0x38;
         const SPDIF_INDEX: usize = 0x30;
@@ -592,6 +611,7 @@ impl State {
         self.mono = slice[0xf4] as u32;
     }
 
+    /// Convert from integer amplitude to db amplitude.
     pub fn get_db(input: u32) -> f64 {
         const ZERO_DBFS: u32 = 0x7fffff00;
         20.0 * (input as f64 / ZERO_DBFS as f64).log10()
