@@ -63,6 +63,7 @@ impl PreSonusStudio1824c {
                 Mix::new(String::from("MIX 3-4"), StripKind::Bus, 1),
                 Mix::new(String::from("MIX 5-6"), StripKind::Bus, 2),
                 Mix::new(String::from("MIX 7-8"), StripKind::Bus, 3),
+                Mix::new(String::from("S/PDIF"), StripKind::Bus, 4),
                 Mix::new(String::from("ADAT 1-2"), StripKind::Bus, 5),
                 Mix::new(String::from("ADAT 3-4"), StripKind::Bus, 6),
                 Mix::new(String::from("ADAT 5-6"), StripKind::Bus, 7),

@@ -209,6 +209,7 @@ impl App {
             KeyCode::Char('6') => self.set_active_mix(5),
             KeyCode::Char('7') => self.set_active_mix(6),
             KeyCode::Char('8') => self.set_active_mix(7),
+            KeyCode::Char('9') => self.set_active_mix(8),
             KeyCode::Char('m') => self.toggle_mute(),
             KeyCode::Char('s') => self.toggle_solo(),
             KeyCode::PageDown => self.increment_meter_heigth(1),
