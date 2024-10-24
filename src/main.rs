@@ -41,7 +41,7 @@ impl App {
             active_strip_index: 0,
             first_strip_index: 0,
             strip_width: 5,
-            meter_heigth: 10,
+            meter_heigth: 20,
             max_height: 0,
             strip_display_cap: 1,
             status_line: String::with_capacity(256),
@@ -521,6 +521,7 @@ impl App {
             .bar_width(self.strip_width)
             .max(500)
     }
+
     fn meter_bar(&self, strip: &usb::Strip) -> Bar {
         let a = -40.0;
         let b = 0.0;
