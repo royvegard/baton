@@ -3,9 +3,10 @@ Mixer control application for PreSonus STUDIO1824c audio interface.
 Written in Rust using Ratatui for terminal user interface.
 
 ## Features
-- 8 stereo mixes for all 36 input channels.
+- 9 stereo mixes for all 36 input channels.
 - Solo and mute for input channels.
-- Mute for the 8 stereo mixes.
+- Mute for the 9 stereo mixes.
+- Metering.
 - Toggle buttons for:
   - 48V phantom power.
   - Input 1-2 Line level signal.
@@ -21,6 +22,7 @@ Written in Rust using Ratatui for terminal user interface.
 | Change volume 10.0 dB | Ctrl + Up/Down arrow |
 | Change volume 0.1 dB | Shift + Up/Down arrow |
 | Change strip width | Ctrl + Left/Right arrow |
+| Change meter height | PgUp/PgDn |
 | Pan left | x |
 | Center pan | c |
 | Pan right | v |
@@ -36,7 +38,7 @@ Written in Rust using Ratatui for terminal user interface.
 
 ```
                       +----------+     +------------+
-                      | Out 1,2  | ... | Out 15,16  |
+                      | Out 1,2  | ... | Out 17,18  |
                       +----------+     +------------+
                         0|  1|           0|  1|
 +------------+ 0         |   |            |   |
@@ -46,7 +48,7 @@ Written in Rust using Ratatui for terminal user interface.
 | p      .   |           |   |            |   |
 | u      .   | 0         |   |            |   |
 | t         =|-----------|---|------------+   |
-|       Mix 8| 1         |   |            |   |
+|       Mix 9| 1         |   |            |   |
 | 1         =|-----------|---|------------|---+
 |            |           |   |            |   |
 +------------+           |   |            |   |
@@ -60,7 +62,7 @@ Written in Rust using Ratatui for terminal user interface.
 | p      .   |           |   |            |   |
 | u      .   | 0         |   |            |   |
 | t         =|-----------|---|------------+   |
-|       Mix 8| 1         |   |            |   |
+|       Mix 9| 1         |   |            |   |
 | 36        =|-----------|---|------------|---+
 |            |           |   |            |   |
 +------------+           |   |            |   |

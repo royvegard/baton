@@ -8,7 +8,7 @@ use ratatui::{
 };
 use std::io;
 use std::time::{Duration, Instant};
-use usb::{State, StripKind};
+use usb::StripKind;
 
 mod usb;
 
@@ -113,14 +113,14 @@ impl App {
             active_strip.solo,
             active_strip.mute,
             active_strip.mute_by_solo,
-            active_strip.meter,
+            active_strip.meter.0,
             self.meter_heigth,
         ));
         let status_line = Line::from(self.status_line.as_str()).left_aligned();
 
         // Autoscroll left and right
         let strips_width = strips_area.inner(Margin::new(1, 1)).width;
-        self.strip_display_cap = strips_width / (self.strip_width + 1);
+        self.strip_display_cap = strips_width / (self.strip_width + 1) - 1;
         while self.active_strip_index < self.first_strip_index {
             self.first_strip_index -= 1;
         }
@@ -508,11 +508,13 @@ impl App {
     }
 
     fn meters_barchart(&self, mix: &usb::Mix) -> BarChart {
-        let bars: Vec<Bar> = mix
+        let mut bars: Vec<Bar> = mix
             .channel_strips
             .iter()
-            .map(|strip| self.meter_bar(strip))
+            .map(|strip| self.meter_bar(strip, strip.meter.0))
             .collect();
+        let dest = mix.get_destination_strip();
+        bars.push(self.meter_bar(dest, dest.meter.1));
         let title = "Meters";
         let title = Line::from(title).centered().bold();
 
@@ -523,12 +525,12 @@ impl App {
             .max(500)
     }
 
-    fn meter_bar(&self, strip: &usb::Strip) -> Bar {
+    fn meter_bar(&self, strip: &usb::Strip, meter_value: f64) -> Bar {
         let a = -40.0;
         let b = 0.0;
         let c = 0.0;
         let d = 500.0;
-        let t = strip.meter;
+        let t = meter_value;
 
         let value: u64 = (c + ((d - c) / (b - a)) * (t - a)) as u64;
 
@@ -537,16 +539,16 @@ impl App {
         let strip_bg_color = Color::DarkGray;
         let label_bg_color = Color::Reset;
 
-        if strip.meter > -18.0 {
+        if meter_value > -18.0 {
             strip_fg_color = Color::Green;
         }
-        if strip.meter > -9.0 {
+        if meter_value > -9.0 {
             strip_fg_color = Color::Yellow;
         }
-        if strip.meter > -3.0 {
+        if meter_value > -3.0 {
             strip_fg_color = Color::Rgb(255, 165, 0);
         }
-        if strip.meter > -0.1 {
+        if meter_value > -0.1 {
             strip_fg_color = Color::Red;
         }
 
@@ -559,7 +561,7 @@ impl App {
                     .fg(label_fg_color)
                     .bg(label_bg_color),
             )
-            .text_value(format!("{0:>5.1}", strip.meter))
+            .text_value(format!("{0:>5.1}", meter_value))
             .style(style)
     }
 }

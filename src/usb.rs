@@ -139,8 +139,7 @@ impl PreSonusStudio1824c {
             let mut adat = [0.0; 8];
             let mut spdif = [0.0; 2];
             let mut daw = [0.0; 18];
-            let mut left = [0.0; 8];
-            let mut right = [0.0; 8];
+            let mut bus = [0.0; 18];
 
             for (i, v) in mic.iter_mut().enumerate() {
                 *v = State::get_db(self.state.mic[i]);
@@ -154,32 +153,35 @@ impl PreSonusStudio1824c {
             for (i, v) in daw.iter_mut().enumerate() {
                 *v = State::get_db(self.state.daw[i]);
             }
-            for (i, v) in left.iter_mut().enumerate() {
-                *v = State::get_db(self.state.left[i]);
-            }
-            for (i, v) in right.iter_mut().enumerate() {
-                *v = State::get_db(self.state.right[i]);
+            for (i, v) in bus.iter_mut().enumerate() {
+                *v = State::get_db(self.state.bus[i]);
             }
 
-            for m in &mut self.mixes {
+            let mut bus_index = 0;
+            for m in &mut self.mixes.iter_mut() {
                 let mut channel_index = 0;
 
                 for v in mic {
-                    m.channel_strips[channel_index].meter = v;
+                    m.channel_strips[channel_index].meter.0 = v;
                     channel_index += 1;
                 }
                 for v in adat {
-                    m.channel_strips[channel_index].meter = v;
+                    m.channel_strips[channel_index].meter.0 = v;
                     channel_index += 1;
                 }
                 for v in spdif {
-                    m.channel_strips[channel_index].meter = v;
+                    m.channel_strips[channel_index].meter.0 = v;
                     channel_index += 1;
                 }
                 for v in daw {
-                    m.channel_strips[channel_index].meter = v;
+                    m.channel_strips[channel_index].meter.0 = v;
                     channel_index += 1;
                 }
+
+                m.channel_strips[channel_index].meter.0 = bus[bus_index];
+                bus_index += 1;
+                m.channel_strips[channel_index].meter.1 = bus[bus_index];
+                bus_index += 1;
             }
 
             // synch button states
@@ -282,10 +284,17 @@ pub enum PanLaw {
 }
 
 pub struct Strip {
+    /// Strip name.
     pub name: String,
+    /// Volume fader in dB.
     pub fader: f64,
-    pub meter: f64,
+    /// Left and right meter in dBFS.
+    /// Left only for mono strips.
+    pub meter: (f64, f64),
+    /// Left/right balance.
+    /// 0 is center. -100 is left, 100 is right.
     pub balance: f64,
+
     pub solo: bool,
     pub mute: bool,
     pub mute_by_solo: bool,
@@ -358,7 +367,7 @@ impl Mix {
                 name: n.to_string(),
                 active: false,
                 fader: 0.0,
-                meter: -f64::INFINITY,
+                meter: (-f64::INFINITY, -f64::INFINITY),
                 solo: false,
                 mute: false,
                 mute_by_solo: false,
@@ -377,7 +386,7 @@ impl Mix {
             name: mix_name,
             active: false,
             fader: 0.0,
-            meter: -f64::INFINITY,
+            meter: (-f64::INFINITY, -f64::INFINITY),
             solo: false,
             mute: false,
             mute_by_solo: false,
@@ -414,12 +423,8 @@ pub struct State {
     adat: [u32; 8],
     /// DAW input meters.
     daw: [u32; 18],
-    /// Input meters for the left channel bus meters
-    left: [u32; 8],
-    /// Input meters for the right channel bus meters
-    right: [u32; 8],
-    d3: u32,
-    d4: u32,
+    /// Stereo busses meters.
+    bus: [u32; 18],
     /// 48V phantom power.
     pub phantom: u32,
     /// Channel 1-2 line mode.
@@ -443,10 +448,7 @@ impl State {
             spdif: [0x00; 2],
             adat: [0x00; 8],
             daw: [0x00; 18],
-            left: [0x00; 8],
-            right: [0x00; 8],
-            d3: 0x00,
-            d4: 0x00,
+            bus: [0x00; 18],
             phantom: 0x00,
             line: 0x00,
             mute: 0x00,
@@ -467,10 +469,7 @@ impl State {
         self.spdif = [0x00; 2];
         self.adat = [0x00; 8];
         self.daw = [0x00; 18];
-        self.left = [0x00; 8];
-        self.right = [0x00; 8];
-        self.d3 = 0x00;
-        self.d4 = 0x00;
+        self.bus = [0x00; 18];
         self.phantom = 0x00;
         self.line = 0x00;
         self.mute = 0x00;
@@ -523,25 +522,11 @@ impl State {
                 i += 1;
             }
         }
-        for m in self.left {
+        for m in self.bus {
             for b in m.to_le_bytes() {
                 arr[i] = b;
                 i += 1;
             }
-        }
-        for m in self.right {
-            for b in m.to_le_bytes() {
-                arr[i] = b;
-                i += 1;
-            }
-        }
-        for b in self.d3.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.d4.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
         }
         for b in self.phantom.to_le_bytes() {
             arr[i] = b;
@@ -582,8 +567,7 @@ impl State {
         const ADAT_INDEX: usize = 0x38;
         const SPDIF_INDEX: usize = 0x30;
         const DAW_INDEX: usize = 0x58;
-        const LEFT_INDEX: usize = 0xa0;
-        const RIGHT_INDEX: usize = 0xc0;
+        const BUS_INDEX: usize = 0xa0;
 
         for i in 0..self.mic.len() {
             self.mic[i] = Self::slice_to_u32(&slice[MIC_INDEX + 4 * i..=MIC_INDEX + 4 * i + 4]);
@@ -598,12 +582,8 @@ impl State {
         for i in 0..self.daw.len() {
             self.daw[i] = Self::slice_to_u32(&slice[DAW_INDEX + 4 * i..=DAW_INDEX + 4 * i + 4]);
         }
-        for i in 0..self.left.len() {
-            self.left[i] = Self::slice_to_u32(&slice[LEFT_INDEX + 4 * i..=LEFT_INDEX + 4 * i + 4]);
-        }
-        for i in 0..self.right.len() {
-            self.right[i] =
-                Self::slice_to_u32(&slice[RIGHT_INDEX + 4 * i..=RIGHT_INDEX + 4 * i + 4]);
+        for i in 0..self.bus.len() {
+            self.bus[i] = Self::slice_to_u32(&slice[BUS_INDEX + 4 * i..=BUS_INDEX + 4 * i + 4]);
         }
 
         self.phantom = slice[0xe8] as u32;
