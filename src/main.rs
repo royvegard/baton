@@ -6,11 +6,17 @@ use ratatui::{
     widgets::{Bar, BarChart, BarGroup, Block, Paragraph},
     DefaultTerminal, Frame,
 };
-use std::io;
-use std::time::{Duration, Instant};
-use usb::StripKind;
+use std::{
+    fs::File,
+    io::{Read, Write},
+    time::{Duration, Instant},
+};
+use std::{io, path::Path};
+use usb::{Mix, StripKind};
 
 mod usb;
+
+const CONFIG_FILE: &str = "baton.json";
 
 fn main() -> io::Result<()> {
     let mut terminal = ratatui::init();
@@ -68,6 +74,19 @@ impl App {
         let tick_rate = Duration::from_millis(100);
         self.last_tick = Instant::now();
 
+        // Load state
+        let path = Path::new(CONFIG_FILE);
+        let file = File::open(CONFIG_FILE);
+
+        match file {
+            Err(_) => (),
+            Ok(mut f) => {
+                let mut serialized = String::new();
+                f.read_to_string(&mut serialized).unwrap();
+                self.load_state(&serialized);
+            }
+        }
+
         while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
             let timeout = tick_rate.saturating_sub(self.last_tick.elapsed());
@@ -80,7 +99,36 @@ impl App {
                 self.last_tick = Instant::now();
             }
         }
+
+        // Save state
+        let serialized = serde_json::to_string_pretty(&self.ps.mixes).unwrap();
+        let mut file = File::create(path).unwrap();
+        file.write_all(serialized.as_bytes()).unwrap();
+        file.flush().unwrap();
+
         Ok(())
+    }
+
+    fn load_state(&mut self, state: &str) {
+        let state: Vec<Mix> = serde_json::from_str(state).unwrap();
+
+        for i in 0..self.ps.mixes.len() {
+            for j in 0..self.ps.mixes[i].channel_strips.len() {
+                self.ps.mixes[i].channel_strips[j].name = state[i].channel_strips[j].name.clone();
+                self.ps.mixes[i].channel_strips[j].fader = state[i].channel_strips[j].fader;
+                self.ps.mixes[i].channel_strips[j].balance = state[i].channel_strips[j].balance;
+                self.ps.mixes[i].channel_strips[j].solo = state[i].channel_strips[j].solo;
+                self.ps.mixes[i].channel_strips[j].mute = state[i].channel_strips[j].mute;
+                self.ps.mixes[i].channel_strips[j].mute_by_solo =
+                    state[i].channel_strips[j].mute_by_solo;
+
+                self.active_strip_index = j;
+                self.active_mix_index = i;
+                self.write_active_fader();
+            }
+        }
+        self.active_strip_index = 0;
+        self.active_mix_index = 0;
     }
 
     fn on_tick(&mut self) {

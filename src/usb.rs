@@ -3,6 +3,7 @@ use nusb::{
     transfer::{ControlIn, ControlOut, ControlType, Recipient, ResponseBuffer, TransferError},
     Device,
 };
+use serde::{Deserialize, Serialize};
 use std::{
     f64::consts::E,
     io::{self, ErrorKind},
@@ -271,8 +272,9 @@ impl Command {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub enum StripKind {
+    #[default]
     Channel,
     Bus,
     Main,
@@ -283,6 +285,7 @@ pub enum PanLaw {
     Exponential,
 }
 
+#[derive(Default, Deserialize, Serialize)]
 pub struct Strip {
     /// Strip name.
     pub name: String,
@@ -290,18 +293,23 @@ pub struct Strip {
     pub fader: f64,
     /// Left and right meter in dBFS.
     /// Left only for mono strips.
+    #[serde(skip)]
     pub meter: (f64, f64),
     /// Left/right balance.
     /// 0 is center. -100 is left, 100 is right.
     pub balance: f64,
-
     pub solo: bool,
     pub mute: bool,
     pub mute_by_solo: bool,
+    #[serde(skip)]
     pub max: f64,
+    #[serde(skip)]
     pub min: f64,
+    #[serde(skip)]
     pub active: bool,
+    #[serde(skip)]
     pub kind: StripKind,
+    #[serde(skip)]
     pub number: u32,
 }
 
@@ -341,6 +349,7 @@ impl Strip {
 /// The last strip is the destination or bus strip,
 /// and the preceeding strips are channels
 /// that route to the destination.
+#[derive(Deserialize, Serialize)]
 pub struct Mix {
     pub channel_strips: Vec<Strip>,
 }
