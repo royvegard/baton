@@ -179,9 +179,9 @@ impl PreSonusStudio1824c {
                     channel_index += 1;
                 }
 
-                m.channel_strips[channel_index].meter.0 = bus[bus_index];
+                m.bus_strip.meter.0 = bus[bus_index];
                 bus_index += 1;
-                m.channel_strips[channel_index].meter.1 = bus[bus_index];
+                m.bus_strip.meter.1 = bus[bus_index];
                 bus_index += 1;
             }
 
@@ -352,6 +352,7 @@ impl Strip {
 #[derive(Deserialize, Serialize)]
 pub struct Mix {
     pub channel_strips: Vec<Strip>,
+    pub bus_strip: Strip,
 }
 
 impl Mix {
@@ -391,7 +392,7 @@ impl Mix {
         }
 
         // The last strip is the destination strip
-        let destination_strip = Strip {
+        let bus_strip = Strip {
             name: mix_name,
             active: false,
             fader: 0.0,
@@ -406,15 +407,26 @@ impl Mix {
             number: mix_number,
         };
 
-        channel_strips.push(destination_strip);
-
-        Mix { channel_strips }
+        Mix {
+            channel_strips,
+            bus_strip,
+        }
     }
 
-    pub fn get_destination_strip(&self) -> &Strip {
-        self.channel_strips
-            .last()
-            .expect("Channel strips should not be empty")
+    pub fn get_strip(&self, index: usize) -> &Strip {
+        if index < self.channel_strips.len() {
+            &self.channel_strips[index]
+        } else {
+            &self.bus_strip
+        }
+    }
+
+    pub fn get_mut_strip(&mut self, index: usize) -> &mut Strip {
+        if index < self.channel_strips.len() {
+            &mut self.channel_strips[index]
+        } else {
+            &mut self.bus_strip
+        }
     }
 }
 
@@ -469,7 +481,6 @@ impl State {
     /// Reset all values to zero.
     /// This is used before requesting state from device.
     fn reset(&mut self) {
-        self.counter = 0x01;
         self.d1 = 0x00;
         self.d2 = 0x00;
         self.fix1 = 0x64656d73;
@@ -487,7 +498,7 @@ impl State {
     }
 
     /// Return the state as an array of bytes.
-    pub fn as_array(&self) -> [u8; 252] {
+    fn as_array(&self) -> [u8; 252] {
         let mut arr = [0u8; 252];
         let mut i = 0;
 
@@ -562,7 +573,7 @@ impl State {
     }
 
     /// Convert a slice of 4 bytes to a u32.
-    pub fn slice_to_u32(slice: &[u8]) -> u32 {
+    fn slice_to_u32(slice: &[u8]) -> u32 {
         let mut out: u32 = slice[0] as u32;
         out += slice[1] as u32 * 0x100;
         out += slice[2] as u32 * 0x100 * 0x100;
@@ -571,7 +582,7 @@ impl State {
         out
     }
 
-    pub fn parse_state(&mut self, slice: Vec<u8>) {
+    fn parse_state(&mut self, slice: Vec<u8>) {
         const MIC_INDEX: usize = 0x10;
         const ADAT_INDEX: usize = 0x38;
         const SPDIF_INDEX: usize = 0x30;
@@ -602,12 +613,12 @@ impl State {
     }
 
     /// Convert from integer amplitude to db amplitude.
-    pub fn get_db(input: u32) -> f64 {
+    fn get_db(input: u32) -> f64 {
         const ZERO_DBFS: u32 = 0x7fffff00;
         20.0 * (input as f64 / ZERO_DBFS as f64).log10()
     }
 
-    pub fn poll_usb_data(&mut self, device: &Device) -> Result<Vec<u8>, TransferError> {
+    fn poll_usb_data(&mut self, device: &Device) -> Result<Vec<u8>, TransferError> {
         self.reset();
 
         let control: ControlOut = ControlOut {

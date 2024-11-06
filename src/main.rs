@@ -32,8 +32,6 @@ pub struct App {
     first_strip_index: usize,
     strip_width: u16,
     meter_heigth: u16,
-    max_height: u16,
-    strip_display_cap: u16,
     status_line: String,
     ps: usb::PreSonusStudio1824c,
     last_tick: Instant,
@@ -48,8 +46,6 @@ impl App {
             first_strip_index: 0,
             strip_width: 5,
             meter_heigth: 20,
-            max_height: 0,
-            strip_display_cap: 1,
             status_line: String::with_capacity(256),
             ps: usb::PreSonusStudio1824c::new().expect("Failed to open device"),
             last_tick: Instant::now(),
@@ -60,13 +56,15 @@ impl App {
     }
 
     fn set_active_strip(&mut self, strip_index: isize) {
-        let strips = &mut self.ps.mixes[self.active_mix_index].channel_strips;
-        self.active_strip_index = strip_index.clamp(0, (strips.len() - 1) as isize) as usize;
+        let mix = &mut self.ps.mixes[self.active_mix_index];
+        self.active_strip_index = strip_index.clamp(0, mix.channel_strips.len() as isize) as usize;
 
-        for s in &mut *strips {
+        for s in &mut *mix.channel_strips {
             s.active = false;
         }
-        strips[self.active_strip_index].active = true;
+        mix.bus_strip.active = false;
+
+        mix.get_mut_strip(self.active_strip_index).active = true;
     }
 
     /// runs the application's main loop until the user quits
@@ -126,6 +124,14 @@ impl App {
                 self.active_mix_index = i;
                 self.write_active_fader();
             }
+
+            self.ps.mixes[i].bus_strip.name = state[i].bus_strip.name.clone();
+            self.ps.mixes[i].bus_strip.fader = state[i].bus_strip.fader;
+            self.ps.mixes[i].bus_strip.mute = state[i].bus_strip.mute;
+
+            // TODO
+            self.active_strip_index += 1;
+            self.write_active_fader();
         }
         self.active_strip_index = 0;
         self.active_mix_index = 0;
@@ -145,16 +151,12 @@ impl App {
         .spacing(0)
         .areas(frame.area());
 
-        self.max_height = strips_area.height + meters_area.height;
-
         // Compose status text
         self.status_line.clear();
-        let active_strip =
-            &self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
+        let active_strip = &self.ps.mixes[self.active_mix_index].get_strip(self.active_strip_index);
+
         self.status_line.push_str(&format!(
-            "{:?} {} - {} ({:>5.1} dB) balance: {}, solo: {}, mute: {}, mute_by_solo: {}, meter: {:>.3}, meter height: {}",
-            active_strip.kind,
-            active_strip.number,
+            "{} ({:>5.1} dB) balance: {}, solo: {}, mute: {}, mute_by_solo: {}, meter: {:>.3}, meter height: {}",
             active_strip.name,
             active_strip.fader,
             active_strip.balance,
@@ -168,12 +170,11 @@ impl App {
 
         // Autoscroll left and right
         let strips_width = strips_area.inner(Margin::new(1, 1)).width;
-        self.strip_display_cap = strips_width / (self.strip_width + 1) - 1;
+        let strip_display_cap = strips_width / (self.strip_width + 1) - 1;
         while self.active_strip_index < self.first_strip_index {
             self.first_strip_index -= 1;
         }
-        while self.active_strip_index > self.first_strip_index + self.strip_display_cap as usize - 1
-        {
+        while self.active_strip_index > self.first_strip_index + strip_display_cap as usize - 1 {
             self.first_strip_index += 1;
         }
 
@@ -324,14 +325,14 @@ impl App {
 
     fn increment_fader(&mut self, delta: f64) {
         let strip =
-            &mut self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
+            &mut self.ps.mixes[self.active_mix_index].get_mut_strip(self.active_strip_index);
         let current = strip.fader;
         strip.set_fader(current + delta);
         self.write_active_fader();
     }
 
     fn write_active_fader(&mut self) {
-        let strip = &self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
+        let strip = &self.ps.mixes[self.active_mix_index].get_strip(self.active_strip_index);
         let muted = strip.mute | strip.mute_by_solo;
         let soloed = strip.solo;
 
@@ -339,9 +340,7 @@ impl App {
         let (left, right) = strip.pan_rule(usb::PanLaw::Exponential);
         match strip.kind {
             usb::StripKind::Main | usb::StripKind::Bus => {
-                self.ps.command.input_strip = self.ps.mixes[self.active_mix_index]
-                    .get_destination_strip()
-                    .number;
+                self.ps.command.input_strip = self.ps.mixes[self.active_mix_index].bus_strip.number;
                 self.ps.command.mode = usb::MODE_BUS_STRIP;
                 self.ps.command.output_bus = 0x00;
 
@@ -353,7 +352,7 @@ impl App {
                 self.ps.send_command();
             }
             usb::StripKind::Channel => {
-                let output_bus = self.ps.mixes[self.active_mix_index].get_destination_strip();
+                let output_bus = &self.ps.mixes[self.active_mix_index].bus_strip;
                 self.ps.command.input_strip = self.active_strip_index as u32;
                 self.ps.command.mode = usb::MODE_CHANNEL_STRIP;
                 self.ps.command.output_bus = output_bus.number;
@@ -421,11 +420,16 @@ impl App {
     }
 
     fn toggle_mute(&mut self) {
-        match self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].kind {
+        match self.ps.mixes[self.active_mix_index]
+            .get_strip(self.active_strip_index)
+            .kind
+        {
             StripKind::Channel | StripKind::Bus => {
-                self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].mute =
-                    !self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index]
-                        .mute;
+                self.ps.mixes[self.active_mix_index]
+                    .get_mut_strip(self.active_strip_index)
+                    .mute = !self.ps.mixes[self.active_mix_index]
+                    .get_strip(self.active_strip_index)
+                    .mute;
 
                 self.write_active_fader();
             }
@@ -436,13 +440,17 @@ impl App {
     }
 
     fn toggle_solo(&mut self) {
-        if let usb::StripKind::Channel =
-            self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].kind
+        if let usb::StripKind::Channel = self.ps.mixes[self.active_mix_index]
+            .get_strip(self.active_strip_index)
+            .kind
         {
-            self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].solo =
-                !self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index].solo;
+            self.ps.mixes[self.active_mix_index]
+                .get_mut_strip(self.active_strip_index)
+                .solo = !self.ps.mixes[self.active_mix_index]
+                .get_strip(self.active_strip_index)
+                .solo;
 
-            let length = self.ps.mixes[self.active_mix_index].channel_strips.len() - 1;
+            let length = self.ps.mixes[self.active_mix_index].channel_strips.len();
 
             let mut solo_exists = false;
             for s in self.ps.mixes[self.active_mix_index]
@@ -458,7 +466,7 @@ impl App {
             let active_strip_index = self.active_strip_index;
             if solo_exists {
                 for i in 0..length {
-                    let s = &mut self.ps.mixes[self.active_mix_index].channel_strips[i];
+                    let s = self.ps.mixes[self.active_mix_index].get_mut_strip(i);
                     s.mute_by_solo = !s.solo;
 
                     self.active_strip_index = i;
@@ -466,7 +474,7 @@ impl App {
                 }
             } else {
                 for i in 0..length {
-                    let s = &mut self.ps.mixes[self.active_mix_index].channel_strips[i];
+                    let s = self.ps.mixes[self.active_mix_index].get_mut_strip(i);
                     s.mute_by_solo = false;
 
                     self.active_strip_index = i;
@@ -483,15 +491,13 @@ impl App {
     }
 
     fn faders_barchart(&self, mix: &usb::Mix) -> BarChart {
-        let bars: Vec<Bar> = mix
+        let mut bars: Vec<Bar> = mix
             .channel_strips
             .iter()
             .map(|strip| self.fader_bar(strip))
             .collect();
-        let title = self.ps.mixes[self.active_mix_index]
-            .get_destination_strip()
-            .name
-            .as_str();
+        bars.push(self.fader_bar(&mix.bus_strip));
+        let title = self.ps.mixes[self.active_mix_index].bus_strip.name.as_str();
         let title = Line::from(title).centered().bold();
 
         BarChart::default()
@@ -561,7 +567,8 @@ impl App {
             .iter()
             .map(|strip| self.meter_bar(strip, strip.meter.0))
             .collect();
-        let dest = mix.get_destination_strip();
+        let dest = &mix.bus_strip;
+        bars.push(self.meter_bar(dest, dest.meter.0));
         bars.push(self.meter_bar(dest, dest.meter.1));
         let title = "Meters";
         let title = Line::from(title).centered().bold();
