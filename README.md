@@ -28,6 +28,7 @@ Written in Rust using Ratatui for terminal user interface.
 | Pan right | v |
 | Solo | s |
 | Mute | m |
+| Clear clip indicators | Space |
 | Toggle 48V phantom power | p |
 | Toggle 1-2 line input mode | l |
 | Toggle Main output mute | u |
