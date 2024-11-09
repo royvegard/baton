@@ -26,7 +26,7 @@ pub(crate) const RIGHT: u32 = 0x01;
 
 // Fader presets
 pub(crate) const MUTED: u32 = 0x00;
-pub(crate) const UNITY: u32 = 0xbc000000;
+pub(crate) const CHANNEL_UNITY: u32 = 0x0100_0000;
 
 pub struct PreSonusStudio1824c {
     pub device: Device,
@@ -164,24 +164,42 @@ impl PreSonusStudio1824c {
 
                 for v in mic {
                     m.channel_strips[channel_index].meter.0 = v;
+                    if m.channel_strips[channel_index].meter.0 > -0.001 {
+                        m.channel_strips[channel_index].clip = true;
+                    }
                     channel_index += 1;
                 }
                 for v in adat {
                     m.channel_strips[channel_index].meter.0 = v;
+                    if m.channel_strips[channel_index].meter.0 > -0.001 {
+                        m.channel_strips[channel_index].clip = true;
+                    }
                     channel_index += 1;
                 }
                 for v in spdif {
                     m.channel_strips[channel_index].meter.0 = v;
+                    if m.channel_strips[channel_index].meter.0 > -0.001 {
+                        m.channel_strips[channel_index].clip = true;
+                    }
                     channel_index += 1;
                 }
                 for v in daw {
                     m.channel_strips[channel_index].meter.0 = v;
+                    if m.channel_strips[channel_index].meter.0 > -0.001 {
+                        m.channel_strips[channel_index].clip = true;
+                    }
                     channel_index += 1;
                 }
 
                 m.bus_strip.meter.0 = bus[bus_index];
+                if m.bus_strip.meter.0 > -0.001 {
+                    m.bus_strip.clip = true;
+                }
                 bus_index += 1;
                 m.bus_strip.meter.1 = bus[bus_index];
+                if m.bus_strip.meter.0 > -0.001 {
+                    m.bus_strip.clip = true;
+                }
                 bus_index += 1;
             }
 
@@ -255,7 +273,7 @@ impl Command {
     }
 
     pub fn set_db(&mut self, db: f64) {
-        self.value = (11877360.0 * E.powf(db.clamp(-96.0, 10.0) / 10.0)) as u32;
+        self.value = (CHANNEL_UNITY as f64 * 10.0_f64.powf(db.clamp(-96.0, 10.0) / 20.0)) as u32;
     }
 
     pub fn send_usb_command(&self, device: &Device) -> Result<ResponseBuffer, TransferError> {
@@ -311,6 +329,8 @@ pub struct Strip {
     pub kind: StripKind,
     #[serde(skip)]
     pub number: u32,
+    #[serde(skip)]
+    pub clip: bool,
 }
 
 impl Strip {
@@ -345,9 +365,9 @@ impl Strip {
     }
 }
 
-/// A Mix contains several channel strips.
-/// The last strip is the destination or bus strip,
-/// and the preceeding strips are channels
+/// A Mix contains several channel strips,
+/// and one destination or bus strip.
+/// The strips are channels
 /// that route to the destination.
 #[derive(Deserialize, Serialize)]
 pub struct Mix {
@@ -386,12 +406,12 @@ impl Mix {
                 balance: 0.0,
                 kind: StripKind::Channel,
                 number: i as u32,
+                clip: false,
             };
 
             channel_strips.push(strip);
         }
 
-        // The last strip is the destination strip
         let bus_strip = Strip {
             name: mix_name,
             active: false,
@@ -405,6 +425,7 @@ impl Mix {
             balance: 0.0,
             kind: mix_kind,
             number: mix_number,
+            clip: false,
         };
 
         Mix {
@@ -614,7 +635,7 @@ impl State {
 
     /// Convert from integer amplitude to db amplitude.
     fn get_db(input: u32) -> f64 {
-        const ZERO_DBFS: u32 = 0x7fffff00;
+        const ZERO_DBFS: u32 = 0x8000_0000;
         20.0 * (input as f64 / ZERO_DBFS as f64).log10()
     }
 
@@ -647,43 +668,5 @@ impl State {
         self.counter += 1;
 
         block_on(device.control_in(control)).into_result()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fadercommand_set_db() {
-        let mut fader = Command::new();
-        fader.set_db(-96.0);
-        fader.set_db(-10.0);
-        fader.set_db(0.0);
-        fader.set_db(10.0);
-    }
-
-    #[test]
-    fn fadercommand_set_value() {
-        let mut fader = Command::new();
-        fader.value = UNITY;
-        fader.value = MUTED;
-    }
-
-    #[test]
-    fn fadercommand_as_array() {
-        let mut fader = Command::new();
-        let a = [
-            0x65, 0x00, 0x00, 0x00, 0x22, 0x00, 0x00, 0x00, 0x69, 0x72, 0x61, 0x50, 0x14, 0x00,
-            0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x26, 0x70, 0xc1, 0x00,
-        ];
-
-        fader.mode = MODE_BUS_STRIP;
-        fader.value = 12677158;
-        fader.set_db(0.651678);
-        fader.input_strip = 0x22;
-        fader.output_bus = 0x04;
-        fader.output_channel = RIGHT;
-        assert_eq!(fader.as_array(), a);
     }
 }

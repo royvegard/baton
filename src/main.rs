@@ -261,6 +261,7 @@ impl App {
             KeyCode::Char('9') => self.set_active_mix(8),
             KeyCode::Char('m') => self.toggle_mute(),
             KeyCode::Char('s') => self.toggle_solo(),
+            KeyCode::Char(' ') => self.clear_clip_indicators(),
             KeyCode::PageDown => self.increment_meter_heigth(1),
             KeyCode::PageUp => self.increment_meter_heigth(-1),
             KeyCode::Char('x') => {
@@ -318,6 +319,15 @@ impl App {
         self.exit = true;
     }
 
+    fn clear_clip_indicators(&mut self) {
+        for mix in &mut self.ps.mixes {
+            for s in &mut mix.channel_strips {
+                s.clip = false;
+            }
+            mix.bus_strip.clip = false;
+        }
+    }
+
     fn increment_meter_heigth(&mut self, delta: i16) {
         let mh = (self.meter_heigth as i16 + delta).clamp(0, 100) as u16;
         self.meter_heigth = mh;
@@ -332,7 +342,7 @@ impl App {
     }
 
     fn write_active_fader(&mut self) {
-        let strip = &self.ps.mixes[self.active_mix_index].get_strip(self.active_strip_index);
+        let strip = self.ps.mixes[self.active_mix_index].get_strip(self.active_strip_index);
         let muted = strip.mute | strip.mute_by_solo;
         let soloed = strip.solo;
 
@@ -581,7 +591,7 @@ impl App {
     }
 
     fn meter_bar(&self, strip: &usb::Strip, meter_value: f64) -> Bar {
-        let a = -40.0;
+        let a = -50.0;
         let b = 0.0;
         let c = 0.0;
         let d = 500.0;
@@ -590,20 +600,23 @@ impl App {
         let value: u64 = (c + ((d - c) / (b - a)) * (t - a)) as u64;
 
         let mut strip_fg_color = Color::Rgb(0, 185, 0);
-        let label_fg_color = Color::White;
+        let mut label_fg_color = Color::White;
         let strip_bg_color = Color::DarkGray;
         let label_bg_color = Color::Reset;
 
+        if strip.clip {
+            label_fg_color = Color::Red;
+        }
         if meter_value > -18.0 {
             strip_fg_color = Color::Green;
         }
         if meter_value > -9.0 {
             strip_fg_color = Color::Yellow;
         }
-        if meter_value > -3.0 {
+        if meter_value > -6.0 {
             strip_fg_color = Color::Rgb(255, 165, 0);
         }
-        if meter_value > -0.1 {
+        if meter_value > -3.0 {
             strip_fg_color = Color::Red;
         }
 
