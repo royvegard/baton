@@ -81,7 +81,8 @@ impl App {
             Ok(mut f) => {
                 let mut serialized = String::new();
                 f.read_to_string(&mut serialized).unwrap();
-                self.load_state(&serialized);
+                self.ps.load_state(&serialized);
+                self.ps.write_state();
             }
         }
 
@@ -105,36 +106,6 @@ impl App {
         file.flush().unwrap();
 
         Ok(())
-    }
-
-    fn load_state(&mut self, state: &str) {
-        let state: Vec<Mix> = serde_json::from_str(state).unwrap();
-
-        for i in 0..self.ps.mixes.len() {
-            for j in 0..self.ps.mixes[i].channel_strips.len() {
-                self.ps.mixes[i].channel_strips[j].name = state[i].channel_strips[j].name.clone();
-                self.ps.mixes[i].channel_strips[j].fader = state[i].channel_strips[j].fader;
-                self.ps.mixes[i].channel_strips[j].balance = state[i].channel_strips[j].balance;
-                self.ps.mixes[i].channel_strips[j].solo = state[i].channel_strips[j].solo;
-                self.ps.mixes[i].channel_strips[j].mute = state[i].channel_strips[j].mute;
-                self.ps.mixes[i].channel_strips[j].mute_by_solo =
-                    state[i].channel_strips[j].mute_by_solo;
-
-                self.active_strip_index = j;
-                self.active_mix_index = i;
-                self.write_active_fader();
-            }
-
-            self.ps.mixes[i].bus_strip.name = state[i].bus_strip.name.clone();
-            self.ps.mixes[i].bus_strip.fader = state[i].bus_strip.fader;
-            self.ps.mixes[i].bus_strip.mute = state[i].bus_strip.mute;
-
-            // TODO
-            self.active_strip_index += 1;
-            self.write_active_fader();
-        }
-        self.active_strip_index = 0;
-        self.active_mix_index = 0;
     }
 
     fn on_tick(&mut self) {
@@ -342,46 +313,8 @@ impl App {
     }
 
     fn write_active_fader(&mut self) {
-        let strip = self.ps.mixes[self.active_mix_index].get_strip(self.active_strip_index);
-        let muted = strip.mute | strip.mute_by_solo;
-        let soloed = strip.solo;
-
-        let fader = strip.fader;
-        let (left, right) = strip.pan_rule(usb::PanLaw::Exponential);
-        match strip.kind {
-            usb::StripKind::Main | usb::StripKind::Bus => {
-                self.ps.command.input_strip = self.ps.mixes[self.active_mix_index].bus_strip.number;
-                self.ps.command.mode = usb::MODE_BUS_STRIP;
-                self.ps.command.output_bus = 0x00;
-
-                self.ps.command.output_channel = usb::LEFT;
-                self.ps.command.set_db(fader);
-                if muted {
-                    self.ps.command.value = usb::MUTED;
-                }
-                self.ps.send_command();
-            }
-            usb::StripKind::Channel => {
-                let output_bus = &self.ps.mixes[self.active_mix_index].bus_strip;
-                self.ps.command.input_strip = self.active_strip_index as u32;
-                self.ps.command.mode = usb::MODE_CHANNEL_STRIP;
-                self.ps.command.output_bus = output_bus.number;
-
-                self.ps.command.output_channel = usb::LEFT;
-                self.ps.command.set_db(left);
-                if muted & !soloed {
-                    self.ps.command.value = usb::MUTED;
-                }
-                self.ps.send_command();
-
-                self.ps.command.output_channel = usb::RIGHT;
-                self.ps.command.set_db(right);
-                if muted & !soloed {
-                    self.ps.command.value = usb::MUTED;
-                }
-                self.ps.send_command();
-            }
-        }
+        self.ps
+            .write_channel_fader(self.active_mix_index, self.active_strip_index);
     }
 
     fn decrement_strip(&mut self) {
@@ -504,9 +437,10 @@ impl App {
         let mut bars: Vec<Bar> = mix
             .channel_strips
             .iter()
-            .map(|strip| self.fader_bar(strip))
+            .enumerate()
+            .map(|(i, strip)| self.fader_bar(strip, &self.ps.channel_name[i]))
             .collect();
-        bars.push(self.fader_bar(&mix.bus_strip));
+        bars.push(self.fader_bar(&mix.bus_strip, &mix.bus_strip.name));
         let title = self.ps.mixes[self.active_mix_index].bus_strip.name.as_str();
         let title = Line::from(title).centered().bold();
 
@@ -517,7 +451,7 @@ impl App {
             .max(500)
     }
 
-    fn fader_bar(&self, strip: &usb::Strip) -> Bar {
+    fn fader_bar(&self, strip: &usb::Strip, name: &String) -> Bar {
         let a = strip.min;
         let b = strip.max;
         let c = 20.0;
@@ -563,7 +497,7 @@ impl App {
         Bar::default()
             .value(value)
             .label(
-                Line::from(strip.name.to_string())
+                Line::from(name.to_string())
                     .fg(label_fg_color)
                     .bg(label_bg_color),
             )
@@ -575,11 +509,12 @@ impl App {
         let mut bars: Vec<Bar> = mix
             .channel_strips
             .iter()
-            .map(|strip| self.meter_bar(strip, strip.meter.0))
+            .enumerate()
+            .map(|(i, strip)| self.meter_bar(strip, &self.ps.channel_name[i], strip.meter.0))
             .collect();
         let dest = &mix.bus_strip;
-        bars.push(self.meter_bar(dest, dest.meter.0));
-        bars.push(self.meter_bar(dest, dest.meter.1));
+        bars.push(self.meter_bar(dest, &mix.bus_strip.name, dest.meter.0));
+        bars.push(self.meter_bar(dest, &mix.bus_strip.name, dest.meter.1));
         let title = "Meters";
         let title = Line::from(title).centered().bold();
 
@@ -590,7 +525,7 @@ impl App {
             .max(500)
     }
 
-    fn meter_bar(&self, strip: &usb::Strip, meter_value: f64) -> Bar {
+    fn meter_bar(&self, strip: &usb::Strip, name: &String, meter_value: f64) -> Bar {
         let a = -50.0;
         let b = 0.0;
         let c = 0.0;
@@ -625,7 +560,7 @@ impl App {
         Bar::default()
             .value(value)
             .label(
-                Line::from(strip.name.to_string())
+                Line::from(name.to_string())
                     .fg(label_fg_color)
                     .bg(label_bg_color),
             )

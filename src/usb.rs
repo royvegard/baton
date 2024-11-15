@@ -4,10 +4,7 @@ use nusb::{
     Device,
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    f64::consts::E,
-    io::{self, ErrorKind},
-};
+use std::io::{self, ErrorKind};
 
 // Modes
 pub(crate) const MODE_BUTTON: u32 = 0x00;
@@ -33,6 +30,7 @@ pub struct PreSonusStudio1824c {
     pub command: Command,
     pub state: State,
     pub mixes: Vec<Mix>,
+    pub channel_name: Vec<String>,
     pub in_1_2_line: bool,
     pub main_mute: bool,
     pub main_mono: bool,
@@ -55,21 +53,35 @@ impl PreSonusStudio1824c {
 
         let device = device_info.open()?;
 
+        let mut channel_name: Vec<String> = vec![];
+        for i in 1..=8 {
+            channel_name.push(format!("MIC {}", i));
+        }
+        for i in 1..=8 {
+            channel_name.push(format!("ADAT {}", i));
+        }
+        channel_name.push("S/PDIF 1".to_string());
+        channel_name.push("S/PDIF 2".to_string());
+        for i in 1..=18 {
+            channel_name.push(format!("DAW {}", i));
+        }
+
         Ok(PreSonusStudio1824c {
             device,
             command: Command::new(),
             state: State::new(),
             mixes: vec![
-                Mix::new(String::from("MAIN 1-2"), StripKind::Main, 0),
-                Mix::new(String::from("MIX 3-4"), StripKind::Bus, 1),
-                Mix::new(String::from("MIX 5-6"), StripKind::Bus, 2),
-                Mix::new(String::from("MIX 7-8"), StripKind::Bus, 3),
-                Mix::new(String::from("S/PDIF"), StripKind::Bus, 4),
-                Mix::new(String::from("ADAT 1-2"), StripKind::Bus, 5),
-                Mix::new(String::from("ADAT 3-4"), StripKind::Bus, 6),
-                Mix::new(String::from("ADAT 5-6"), StripKind::Bus, 7),
-                Mix::new(String::from("ADAT 7-8"), StripKind::Bus, 8),
+                Mix::new(&channel_name, String::from("MAIN 1-2"), StripKind::Main, 0),
+                Mix::new(&channel_name, String::from("MIX 3-4"), StripKind::Bus, 1),
+                Mix::new(&channel_name, String::from("MIX 5-6"), StripKind::Bus, 2),
+                Mix::new(&channel_name, String::from("MIX 7-8"), StripKind::Bus, 3),
+                Mix::new(&channel_name, String::from("S/PDIF"), StripKind::Bus, 4),
+                Mix::new(&channel_name, String::from("ADAT 1-2"), StripKind::Bus, 5),
+                Mix::new(&channel_name, String::from("ADAT 3-4"), StripKind::Bus, 6),
+                Mix::new(&channel_name, String::from("ADAT 5-6"), StripKind::Bus, 7),
+                Mix::new(&channel_name, String::from("ADAT 7-8"), StripKind::Bus, 8),
             ],
+            channel_name,
             in_1_2_line: false,
             main_mute: false,
             main_mono: false,
@@ -208,6 +220,77 @@ impl PreSonusStudio1824c {
             self.in_1_2_line = self.state.line == 0x01;
             self.main_mute = self.state.mute == 0x01;
             self.main_mono = self.state.mono == 0x01;
+        }
+    }
+
+    pub fn load_state(&mut self, state: &str) {
+        let state: Vec<Mix> = serde_json::from_str(state).unwrap();
+
+        for i in 0..self.mixes.len() {
+            for j in 0..self.mixes[i].channel_strips.len() {
+                self.mixes[i].channel_strips[j].name = state[i].channel_strips[j].name.clone();
+                self.mixes[i].channel_strips[j].fader = state[i].channel_strips[j].fader;
+                self.mixes[i].channel_strips[j].balance = state[i].channel_strips[j].balance;
+                self.mixes[i].channel_strips[j].solo = state[i].channel_strips[j].solo;
+                self.mixes[i].channel_strips[j].mute = state[i].channel_strips[j].mute;
+                self.mixes[i].channel_strips[j].mute_by_solo =
+                    state[i].channel_strips[j].mute_by_solo;
+            }
+
+            self.mixes[i].bus_strip.name = state[i].bus_strip.name.clone();
+            self.mixes[i].bus_strip.fader = state[i].bus_strip.fader;
+            self.mixes[i].bus_strip.mute = state[i].bus_strip.mute;
+        }
+    }
+
+    pub fn write_state(&mut self) {
+        for i in 0..self.mixes.len() {
+            for j in 0..self.mixes[i].channel_strips.len() {
+                self.write_channel_fader(i, j);
+            }
+        }
+    }
+
+    pub fn write_channel_fader(&mut self, mix_index: usize, channel_index: usize) {
+        let strip = self.mixes[mix_index].get_strip(channel_index);
+        let muted = strip.mute | strip.mute_by_solo;
+        let soloed = strip.solo;
+
+        let fader = strip.fader;
+        let (left, right) = strip.pan_rule(PanLaw::Exponential);
+        match strip.kind {
+            StripKind::Main | StripKind::Bus => {
+                self.command.input_strip = self.mixes[mix_index].bus_strip.number;
+                self.command.mode = MODE_BUS_STRIP;
+                self.command.output_bus = 0x00;
+
+                self.command.output_channel = LEFT;
+                self.command.set_db(fader);
+                if muted {
+                    self.command.value = MUTED;
+                }
+                self.send_command();
+            }
+            StripKind::Channel => {
+                let output_bus = &self.mixes[mix_index].bus_strip;
+                self.command.input_strip = channel_index as u32;
+                self.command.mode = MODE_CHANNEL_STRIP;
+                self.command.output_bus = output_bus.number;
+
+                self.command.output_channel = LEFT;
+                self.command.set_db(left);
+                if muted & !soloed {
+                    self.command.value = MUTED;
+                }
+                self.send_command();
+
+                self.command.output_channel = RIGHT;
+                self.command.set_db(right);
+                if muted & !soloed {
+                    self.command.value = MUTED;
+                }
+                self.send_command();
+            }
         }
     }
 }
@@ -376,23 +459,15 @@ pub struct Mix {
 }
 
 impl Mix {
-    pub fn new(mix_name: String, mix_kind: StripKind, mix_number: u32) -> Self {
+    pub fn new(
+        channel_names: &[String],
+        mix_name: String,
+        mix_kind: StripKind,
+        mix_number: u32,
+    ) -> Self {
         let mut channel_strips = Vec::<Strip>::new();
-        let mut names = vec![];
 
-        for i in 1..=8 {
-            names.push(format!("MIC {}", i));
-        }
-        for i in 1..=8 {
-            names.push(format!("ADAT {}", i));
-        }
-        names.push("S/PDIF 1".to_string());
-        names.push("S/PDIF 2".to_string());
-        for i in 1..=18 {
-            names.push(format!("DAW {}", i));
-        }
-
-        for (i, n) in names.iter().enumerate() {
+        for (i, n) in channel_names.iter().enumerate() {
             let strip = Strip {
                 name: n.to_string(),
                 active: false,
