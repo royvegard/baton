@@ -383,49 +383,8 @@ impl App {
     }
 
     fn toggle_solo(&mut self) {
-        if let usb::StripKind::Channel = self.ps.mixes[self.active_mix_index]
-            .get_strip(self.active_strip_index)
-            .kind
-        {
-            self.ps.mixes[self.active_mix_index]
-                .get_mut_strip(self.active_strip_index)
-                .solo = !self.ps.mixes[self.active_mix_index]
-                .get_strip(self.active_strip_index)
-                .solo;
-
-            let length = self.ps.mixes[self.active_mix_index].channel_strips.len();
-
-            let mut solo_exists = false;
-            for s in self.ps.mixes[self.active_mix_index]
-                .channel_strips
-                .iter()
-                .take(length)
-            {
-                if s.solo {
-                    solo_exists = true;
-                }
-            }
-
-            let active_strip_index = self.active_strip_index;
-            if solo_exists {
-                for i in 0..length {
-                    let s = self.ps.mixes[self.active_mix_index].get_mut_strip(i);
-                    s.mute_by_solo = !s.solo;
-
-                    self.active_strip_index = i;
-                    self.write_active_fader();
-                }
-            } else {
-                for i in 0..length {
-                    let s = self.ps.mixes[self.active_mix_index].get_mut_strip(i);
-                    s.mute_by_solo = false;
-
-                    self.active_strip_index = i;
-                    self.write_active_fader();
-                }
-            }
-            self.active_strip_index = active_strip_index;
-        }
+        self.ps.mixes[self.active_mix_index].toggle_solo(self.active_strip_index);
+        self.ps.write_state();
     }
 
     fn set_active_mix(&mut self, index: usize) {

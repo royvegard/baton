@@ -524,6 +524,31 @@ impl Mix {
             &mut self.bus_strip
         }
     }
+
+    pub fn toggle_solo(&mut self, index: usize) {
+        if let StripKind::Channel = self.get_strip(index).kind {
+            self.get_mut_strip(index).solo = !self.get_strip(index).solo;
+
+            let number_of_strips = self.channel_strips.len();
+
+            let mut solo_exists = false;
+            for s in self.channel_strips.iter().take(number_of_strips) {
+                if s.solo {
+                    solo_exists = true;
+                }
+            }
+
+            if solo_exists {
+                for i in 0..number_of_strips {
+                    self.get_mut_strip(i).mute_by_solo = true;
+                }
+            } else {
+                for i in 0..number_of_strips {
+                    self.get_mut_strip(i).mute_by_solo = false;
+                }
+            }
+        }
+    }
 }
 
 pub struct State {
