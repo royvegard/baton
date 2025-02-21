@@ -57,11 +57,11 @@ impl PreSonusStudio1824c {
         for i in 1..=8 {
             channel_name.push(format!("MIC {}", i));
         }
+        channel_name.push("S/PDIF 1".to_string());
+        channel_name.push("S/PDIF 2".to_string());
         for i in 1..=8 {
             channel_name.push(format!("ADAT {}", i));
         }
-        channel_name.push("S/PDIF 1".to_string());
-        channel_name.push("S/PDIF 2".to_string());
         for i in 1..=18 {
             channel_name.push(format!("DAW {}", i));
         }
@@ -181,14 +181,14 @@ impl PreSonusStudio1824c {
                     }
                     channel_index += 1;
                 }
-                for v in adat {
+                for v in spdif {
                     m.channel_strips[channel_index].meter.0 = v;
                     if m.channel_strips[channel_index].meter.0 > -0.001 {
                         m.channel_strips[channel_index].clip = true;
                     }
                     channel_index += 1;
                 }
-                for v in spdif {
+                for v in adat {
                     m.channel_strips[channel_index].meter.0 = v;
                     if m.channel_strips[channel_index].meter.0 > -0.001 {
                         m.channel_strips[channel_index].clip = true;
