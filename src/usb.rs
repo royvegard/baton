@@ -295,7 +295,6 @@ impl PreSonusStudio1824c {
     }
 }
 
-#[derive(Debug)]
 pub struct Command {
     pub mode: u32,
     pub input_strip: u32,

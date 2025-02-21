@@ -7,16 +7,15 @@ use ratatui::{
     DefaultTerminal, Frame,
 };
 use std::{
+    env,
     fs::File,
     io::{Read, Write},
     time::{Duration, Instant},
 };
 use std::{io, path::Path};
-use usb::{Mix, StripKind};
+use usb::StripKind;
 
 mod usb;
-
-const CONFIG_FILE: &str = "baton.json";
 
 fn main() -> io::Result<()> {
     let mut terminal = ratatui::init();
@@ -73,8 +72,12 @@ impl App {
         self.last_tick = Instant::now();
 
         // Load state
-        let path = Path::new(CONFIG_FILE);
-        let file = File::open(CONFIG_FILE);
+        let config_file = match env::var("HOME") {
+            Ok(h) => format!("{h}/.baton.json"),
+            Err(_) => "baton.json".to_string(),
+        };
+        let path = Path::new(&config_file);
+        let file = File::open(&config_file);
 
         match file {
             Err(_) => (),
