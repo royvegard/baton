@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, ErrorKind};
 
 // Modes
-pub(crate) const MODE_BUTTON: u32 = 0x00;
-pub(crate) const MODE_CHANNEL_STRIP: u32 = 0x64;
-pub(crate) const MODE_BUS_STRIP: u32 = 0x65;
+const MODE_BUTTON: u32 = 0x00;
+const MODE_CHANNEL_STRIP: u32 = 0x64;
+const MODE_BUS_STRIP: u32 = 0x65;
 
 // Buttons
 const BUTTON_1_2_LINE: u32 = 0x00;
@@ -18,12 +18,12 @@ const BUTTON_MAIN_MONO: u32 = 0x02;
 const BUTTON_PHANTOM_POWER: u32 = 0x04;
 
 // Output channels
-pub(crate) const LEFT: u32 = 0x00;
-pub(crate) const RIGHT: u32 = 0x01;
+const LEFT: u32 = 0x00;
+const RIGHT: u32 = 0x01;
 
 // Fader presets
-pub(crate) const MUTED: u32 = 0x00;
-pub(crate) const CHANNEL_UNITY: u32 = 0x0100_0000;
+const MUTED: u32 = 0x00;
+const CHANNEL_UNITY: u32 = 0x0100_0000;
 
 pub struct PreSonusStudio1824c {
     pub device: Device,
