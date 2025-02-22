@@ -245,9 +245,12 @@ impl PreSonusStudio1824c {
 
     pub fn write_state(&mut self) {
         for i in 0..self.mixes.len() {
+            let mut bus_index = 0;
             for j in 0..self.mixes[i].channel_strips.len() {
                 self.write_channel_fader(i, j);
+                bus_index = j;
             }
+            self.write_channel_fader(i, bus_index + 1);
         }
     }
 
