@@ -400,7 +400,7 @@ impl App {
             .channel_strips
             .iter()
             .enumerate()
-            .map(|(i, strip)| self.fader_bar(strip, &self.ps.channel_name[i]))
+            .map(|(i, strip)| self.fader_bar(strip, self.ps.channel_name(i)))
             .collect();
         bars.push(self.fader_bar(&mix.bus_strip, &mix.bus_strip.name));
         let title = self.ps.mixes[self.active_mix_index].bus_strip.name.as_str();
@@ -413,7 +413,7 @@ impl App {
             .max(500)
     }
 
-    fn fader_bar(&self, strip: &usb::Strip, name: &String) -> Bar {
+    fn fader_bar(&self, strip: &usb::Strip, name: &str) -> Bar {
         let a = strip.min;
         let b = strip.max;
         let c = 20.0;
@@ -472,7 +472,7 @@ impl App {
             .channel_strips
             .iter()
             .enumerate()
-            .map(|(i, strip)| self.meter_bar(strip, &self.ps.channel_name[i], strip.meter.0))
+            .map(|(i, strip)| self.meter_bar(strip, self.ps.channel_name(i), strip.meter.0))
             .collect();
         let dest = &mix.bus_strip;
         bars.push(self.meter_bar(dest, &mix.bus_strip.name, dest.meter.0));
@@ -487,7 +487,7 @@ impl App {
             .max(500)
     }
 
-    fn meter_bar(&self, strip: &usb::Strip, name: &String, meter_value: f64) -> Bar {
+    fn meter_bar(&self, strip: &usb::Strip, name: &str, meter_value: f64) -> Bar {
         let a = -50.0;
         let b = 0.0;
         let c = 0.0;

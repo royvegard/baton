@@ -1,3 +1,4 @@
+use core::time::Duration;
 use futures_lite::future::block_on;
 use nusb::{
     transfer::{ControlIn, ControlOut, ControlType, Recipient, ResponseBuffer, TransferError},
@@ -30,7 +31,6 @@ pub struct PreSonusStudio1824c {
     pub command: Command,
     pub state: State,
     pub mixes: Vec<Mix>,
-    pub channel_name: Vec<String>,
     pub in_1_2_line: bool,
     pub main_mute: bool,
     pub main_mono: bool,
@@ -53,15 +53,17 @@ impl PreSonusStudio1824c {
 
         let device = device_info.open()?;
 
+        let number_of_channels = 18;
+        let string_descriptor_index = 33;
+
+        let timeout = Duration::from_millis(100);
+
         let mut channel_name: Vec<String> = vec![];
-        for i in 1..=8 {
-            channel_name.push(format!("MIC {}", i));
+        for i in 0..number_of_channels {
+            let name = device.get_string_descriptor(string_descriptor_index + i, 0, timeout)?;
+            channel_name.push(name);
         }
-        channel_name.push("S/PDIF 1".to_string());
-        channel_name.push("S/PDIF 2".to_string());
-        for i in 1..=8 {
-            channel_name.push(format!("ADAT {}", i));
-        }
+
         for i in 1..=18 {
             channel_name.push(format!("DAW {}", i));
         }
@@ -81,12 +83,15 @@ impl PreSonusStudio1824c {
                 Mix::new(&channel_name, String::from("ADAT 5-6"), StripKind::Bus, 7),
                 Mix::new(&channel_name, String::from("ADAT 7-8"), StripKind::Bus, 8),
             ],
-            channel_name,
             in_1_2_line: false,
             main_mute: false,
             main_mono: false,
             phantom_power: false,
         })
+    }
+
+    pub fn channel_name(&self, index: usize) -> &str {
+        self.mixes[0].channel_strips[index].name.as_str()
     }
 
     pub fn set_1_2_line(&mut self, on: bool) {
