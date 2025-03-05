@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 crossterm = "0.28.1"
-futures-lite = "2.4.0"
-nusb = "0.1.10"
+futures-lite = "2.6.0"
+nusb = "0.1"
 ratatui = "0.29"
-serde = { version = "1.0.214", features = ["derive"] }
-serde_json = "1.0.132"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
