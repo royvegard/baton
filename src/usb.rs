@@ -102,7 +102,7 @@ impl PreSonusStudio1824c {
         self.command.output_channel = BUTTON_1_2_LINE;
         self.command.value = b;
 
-        self.send_command();
+        let _ = self.command.send_usb_command(&self.device);
         self.in_1_2_line = on;
     }
 
@@ -114,7 +114,7 @@ impl PreSonusStudio1824c {
         self.command.output_channel = BUTTON_MAIN_MUTE;
         self.command.value = b;
 
-        self.send_command();
+        let _ = self.command.send_usb_command(&self.device);
         self.main_mute = on;
     }
 
@@ -126,7 +126,7 @@ impl PreSonusStudio1824c {
         self.command.output_channel = BUTTON_MAIN_MONO;
         self.command.value = b;
 
-        self.send_command();
+        let _ = self.command.send_usb_command(&self.device);
         self.main_mono = on;
     }
 
@@ -138,12 +138,8 @@ impl PreSonusStudio1824c {
         self.command.output_channel = BUTTON_PHANTOM_POWER;
         self.command.value = b;
 
-        self.send_command();
-        self.phantom_power = on;
-    }
-
-    pub fn send_command(&self) {
         let _ = self.command.send_usb_command(&self.device);
+        self.phantom_power = on;
     }
 
     pub fn poll_state(&mut self) {
@@ -277,7 +273,7 @@ impl PreSonusStudio1824c {
                 if muted {
                     self.command.value = MUTED;
                 }
-                self.send_command();
+                let _ = self.command.send_usb_command(&self.device);
             }
             StripKind::Channel => {
                 let output_bus = &self.mixes[mix_index].bus_strip;
@@ -290,14 +286,14 @@ impl PreSonusStudio1824c {
                 if muted & !soloed {
                     self.command.value = MUTED;
                 }
-                self.send_command();
+                let _ = self.command.send_usb_command(&self.device);
 
                 self.command.output_channel = RIGHT;
                 self.command.set_db(right);
                 if muted & !soloed {
                     self.command.value = MUTED;
                 }
-                self.send_command();
+                let _ = self.command.send_usb_command(&self.device);
             }
         }
     }
