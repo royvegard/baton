@@ -1,4 +1,5 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use pan::Pan;
 use ratatui::{
     layout::{Constraint, Layout, Margin},
     style::{Color, Style, Stylize},
@@ -15,6 +16,7 @@ use std::{
 use std::{io, path::Path};
 use usb::StripKind;
 
+mod pan;
 mod usb;
 
 fn main() -> io::Result<()> {
@@ -116,9 +118,10 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        let [state_area, meters_area, strips_area, status_area] = Layout::vertical([
+        let [state_area, meters_area, pan_area, strips_area, status_area] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Percentage(self.meter_heigth),
+            Constraint::Length(1),
             Constraint::Fill(1),
             Constraint::Length(3),
         ])
@@ -196,6 +199,12 @@ impl App {
         frame.render_widget(
             self.meters_barchart(&self.ps.mixes[self.active_mix_index]),
             meters_area,
+        );
+        frame.render_widget(
+            Pan {
+                balance: self.ps.mixes[self.active_mix_index].channel_strips[0].balance as i64,
+            },
+            pan_area,
         );
         frame.render_widget(
             self.faders_barchart(&self.ps.mixes[self.active_mix_index]),
@@ -466,6 +475,18 @@ impl App {
             .text_value(format!("{0:>5.1}", strip.fader))
             .style(style)
     }
+
+    // fn pan_widgets(&self, mix: &usb::Mix) -> Widget {
+    //     let mut pans: Vec<Pan> = mix
+    //         .channel_strips
+    //         .iter()
+    //         .map(|strip| Pan {
+    //             balance: strip.balance,
+    //         })
+    //         .collect();
+
+    //     Layout::horizontal(constraints)
+    // }
 
     fn meters_barchart(&self, mix: &usb::Mix) -> BarChart {
         let mut bars: Vec<Bar> = mix
