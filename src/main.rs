@@ -1,4 +1,5 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use flexi_logger::{detailed_format, FileSpec};
 use pan::Pan;
 use ratatui::{
     layout::{Constraint, Layout, Margin},
@@ -20,9 +21,19 @@ mod pan;
 mod usb;
 
 fn main() -> io::Result<()> {
+    let _logger = flexi_logger::Logger::try_with_env()
+        .unwrap()
+        .log_to_file(FileSpec::default().suppress_timestamp())
+        .format(detailed_format)
+        .append()
+        .start()
+        .unwrap();
+
+    log::info!("Starting Baton");
     let mut terminal = ratatui::init();
     let app_result = App::new().run(&mut terminal);
     ratatui::restore();
+    log::info!("Ending Baton");
     app_result
 }
 
