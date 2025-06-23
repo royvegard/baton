@@ -35,6 +35,7 @@ pub struct PreSonusStudio1824c {
     pub main_mute: bool,
     pub main_mono: bool,
     pub phantom_power: bool,
+    descriptor: Vec<String>,
 }
 
 impl PreSonusStudio1824c {
@@ -54,13 +55,24 @@ impl PreSonusStudio1824c {
         let device = device_info.open()?;
 
         let number_of_channels = 18;
-        let string_descriptor_index = 33;
+
+        // # Read all string descriptors from device
+        // Channel name descriptors start at this index
+        let input_channel_name_index = 33;
+        let mut channel_name: Vec<String> = vec![];
+        let mut desc: Vec<String> = vec![];
+        // Descriptor at index 0 is reserved for Language Table, we skip it.
+        desc.push(String::from("LT"));
 
         let timeout = Duration::from_millis(100);
+        let mut i = 1;
+        while let Ok(d) = device.get_string_descriptor(i, 0, timeout) {
+            desc.push(d);
+            i += 1;
+        }
 
-        let mut channel_name: Vec<String> = vec![];
         for i in 0..number_of_channels {
-            let name = device.get_string_descriptor(string_descriptor_index + i, 0, timeout)?;
+            let name = desc[input_channel_name_index + i].clone();
             channel_name.push(name);
         }
 
@@ -87,6 +99,7 @@ impl PreSonusStudio1824c {
             main_mute: false,
             main_mono: false,
             phantom_power: false,
+            descriptor: desc,
         })
     }
 
