@@ -45,6 +45,7 @@ impl PreSonusStudio1824c {
         {
             Some(d) => d,
             None => {
+                log::error!("Presonus STUDIO1824c not found");
                 return Err(io::Error::new(
                     ErrorKind::NotFound,
                     "PreSonus STUDIO1824c not found",
@@ -52,7 +53,24 @@ impl PreSonusStudio1824c {
             }
         };
 
+        let interfaces = device_info.interfaces();
+        for i in interfaces {
+            log::debug!(
+                "Interface: {} {}",
+                i.interface_number(),
+                i.interface_string().unwrap_or_default()
+            );
+        }
+
+        log::info!(
+            "Found Manufacturer: {}, Product: {}, Serial: {}",
+            device_info.manufacturer_string().unwrap_or("unknown"),
+            device_info.product_string().unwrap_or("unknown"),
+            device_info.serial_number().unwrap_or("unknown"),
+        );
+
         let device = device_info.open()?;
+        log::info!("Opened device");
 
         let number_of_channels = 18;
 
@@ -67,6 +85,7 @@ impl PreSonusStudio1824c {
         let timeout = Duration::from_millis(100);
         let mut i = 1;
         while let Ok(d) = device.get_string_descriptor(i, 0, timeout) {
+            log::debug!("Descriptor {}: {}", i, d);
             desc.push(d);
             i += 1;
         }
