@@ -53,6 +53,13 @@ impl PreSonusStudio1824c {
             }
         };
 
+        log::info!(
+            "Found Manufacturer: {}, Product: {}, Serial: {}",
+            device_info.manufacturer_string().unwrap_or("unknown"),
+            device_info.product_string().unwrap_or("unknown"),
+            device_info.serial_number().unwrap_or("unknown"),
+        );
+
         let interfaces = device_info.interfaces();
         for i in interfaces {
             log::debug!(
@@ -61,13 +68,6 @@ impl PreSonusStudio1824c {
                 i.interface_string().unwrap_or_default()
             );
         }
-
-        log::info!(
-            "Found Manufacturer: {}, Product: {}, Serial: {}",
-            device_info.manufacturer_string().unwrap_or("unknown"),
-            device_info.product_string().unwrap_or("unknown"),
-            device_info.serial_number().unwrap_or("unknown"),
-        );
 
         let device = device_info.open()?;
         log::info!("Opened device");
