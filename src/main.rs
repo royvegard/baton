@@ -47,6 +47,7 @@ pub struct App {
     status_line: String,
     ps: usb::PreSonusStudio1824c,
     last_tick: Instant,
+    bypass: bool,
 }
 
 impl App {
@@ -61,6 +62,7 @@ impl App {
             status_line: String::with_capacity(256),
             ps: usb::PreSonusStudio1824c::new().expect("Failed to open device"),
             last_tick: Instant::now(),
+            bypass: false,
         };
 
         app.set_active_strip(app.active_strip_index as isize);
@@ -196,14 +198,23 @@ impl App {
             mono = mono.style(Style::new().reset());
         }
 
+        let mut bypass: Span = Span::from(" Bypass ");
+        if self.bypass {
+            bypass = bypass.style(Style::new().bold().black().on_light_blue());
+        } else {
+            bypass = bypass.style(Style::new().reset());
+        }
+
         let state_line = Line::from(vec![
             phantom,
             spacer.clone(),
             line,
             spacer.clone(),
             mute,
-            spacer,
+            spacer.clone(),
             mono,
+            spacer,
+            bypass,
         ]);
 
         frame.render_widget(state_line, state_area);
@@ -255,6 +266,7 @@ impl App {
             KeyCode::Char('9') => self.set_active_mix(8),
             KeyCode::Char('m') => self.toggle_mute(),
             KeyCode::Char('s') => self.toggle_solo(),
+            KeyCode::Char('b') => self.toggle_bypass(),
             KeyCode::Char(' ') => self.clear_clip_indicators(),
             KeyCode::PageDown => self.increment_meter_heigth(1),
             KeyCode::PageUp => self.increment_meter_heigth(-1),
@@ -408,6 +420,15 @@ impl App {
     fn toggle_solo(&mut self) {
         self.ps.mixes[self.active_mix_index].toggle_solo(self.active_strip_index);
         self.ps.write_state();
+    }
+
+    fn toggle_bypass(&mut self) {
+        self.bypass = !self.bypass;
+        if self.bypass {
+            self.ps.bypass_mixer();
+        } else {
+            self.ps.write_state();
+        }
     }
 
     fn set_active_mix(&mut self, index: usize) {

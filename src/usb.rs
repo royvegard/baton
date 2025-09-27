@@ -329,6 +329,68 @@ impl PreSonusStudio1824c {
             }
         }
     }
+
+    pub fn bypass_mixer(&mut self) {
+        // Set all bus faders to unity gain
+        self.command.mode = MODE_BUS_STRIP;
+        self.command.value = CHANNEL_UNITY;
+
+        for m in 0..self.mixes.len() {
+            self.command.input_strip = m as u32;
+            self.command.output_channel = LEFT;
+            let _ = self.command.send_usb_command(&self.device);
+            self.command.output_channel = RIGHT;
+            let _ = self.command.send_usb_command(&self.device);
+        }
+
+        // Set:
+        // Daw 1 -> Line out 1, Daw 2 -> Line out 2
+        // Daw 3 -> Line out 3, Daw 4 -> Line out 4
+        // Daw 5 -> Line out 5, Daw 6 -> Line out 6
+        // Daw 7 -> Line out 7, Daw 8 -> Line out 8
+        // Daw 9 -> SPDIF out 1, Daw 10 -> SPDIF out 2
+        // Daw 11 -> ADAT out 1, Daw 12 -> ADAT out 2
+        // Daw 13 -> ADAT out 3, Daw 14 -> ADAT out 4
+        // Daw 15 -> ADAT out 5, Daw 16 -> ADAT out 6
+        // Daw 17 -> ADAT out 7, Daw 18 -> ADAT out 8
+        // Everything else muted
+
+        let channel_strips = self.mixes[0].channel_strips.len();
+        self.command.mode = MODE_CHANNEL_STRIP;
+        self.command.value = MUTED;
+        let mut daw_channel_left = 16;
+        let mut daw_channel_right;
+
+        for m in 0..self.mixes.len() {
+            daw_channel_left += 2;
+            daw_channel_right = daw_channel_left + 1;
+            self.command.output_bus = m as u32;
+            for c in 0..channel_strips {
+                self.command.input_strip = c as u32;
+                if c == daw_channel_left {
+                    self.command.value = CHANNEL_UNITY;
+                    self.command.output_channel = LEFT;
+                    let _ = self.command.send_usb_command(&self.device);
+                    self.command.value = MUTED;
+                    self.command.output_channel = RIGHT;
+                    let _ = self.command.send_usb_command(&self.device);
+                } else if c == daw_channel_right {
+                    self.command.value = MUTED;
+                    self.command.output_channel = LEFT;
+                    let _ = self.command.send_usb_command(&self.device);
+                    self.command.value = CHANNEL_UNITY;
+                    self.command.output_channel = RIGHT;
+                    let _ = self.command.send_usb_command(&self.device);
+                } else {
+                    self.command.value = MUTED;
+                    self.command.output_channel = LEFT;
+                    let _ = self.command.send_usb_command(&self.device);
+                    self.command.output_channel = RIGHT;
+                    let _ = self.command.send_usb_command(&self.device);
+                }
+            }
+        }
+    }
 }
 
 pub struct Command {
