@@ -16,7 +16,7 @@ impl Pan {
         }
 
         let mut width = area.width;
-        if width % 2 == 0 {
+        if width.is_multiple_of(2) {
             width -= 1;
         }
         let center = area.left() + width / 2;

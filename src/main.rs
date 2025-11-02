@@ -1,12 +1,12 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use flexi_logger::{detailed_format, FileSpec};
+use flexi_logger::{FileSpec, detailed_format};
 use pan::Pan;
 use ratatui::{
+    DefaultTerminal, Frame,
     layout::{Constraint, Layout, Margin},
     style::{Color, Style, Stylize},
     text::{Line, Span},
     widgets::{Bar, BarChart, BarGroup, Block, Paragraph},
-    DefaultTerminal, Frame,
 };
 use std::{
     env,
@@ -436,7 +436,7 @@ impl App {
         self.set_active_strip(self.active_strip_index as isize);
     }
 
-    fn faders_barchart(&self, mix: &usb::Mix) -> BarChart {
+    fn faders_barchart(&self, mix: &usb::Mix) -> BarChart<'_> {
         let mut bars: Vec<Bar> = mix
             .channel_strips
             .iter()
@@ -454,7 +454,7 @@ impl App {
             .max(500)
     }
 
-    fn fader_bar(&self, strip: &usb::Strip, name: &str) -> Bar {
+    fn fader_bar(&self, strip: &usb::Strip, name: &str) -> Bar<'_> {
         let a = strip.min;
         let b = strip.max;
         let c = 20.0;
@@ -520,7 +520,7 @@ impl App {
     //     Layout::horizontal(constraints)
     // }
 
-    fn meters_barchart(&self, mix: &usb::Mix) -> BarChart {
+    fn meters_barchart(&self, mix: &usb::Mix) -> BarChart<'_> {
         let mut bars: Vec<Bar> = mix
             .channel_strips
             .iter()
@@ -540,7 +540,7 @@ impl App {
             .max(500)
     }
 
-    fn meter_bar(&self, strip: &usb::Strip, name: &str, meter_value: f64) -> Bar {
+    fn meter_bar(&self, strip: &usb::Strip, name: &str, meter_value: f64) -> Bar<'_> {
         let a = -50.0;
         let b = 0.0;
         let c = 0.0;
