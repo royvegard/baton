@@ -104,104 +104,115 @@ impl PreSonusStudio1824c {
     }
 
     pub fn set_1_2_line(&mut self, on: bool) {
-        self.command.set_button(Button::Line, on).send(&self.device);
-        self.in_1_2_line = on;
+        match self.command.set_button(Button::Line, on).send(&self.device) {
+            Ok(_) => log::debug!("Set 1/2 line to {}", on),
+            Err(e) => log::error!("Error setting 1/2 line: {}", e),
+        }
     }
 
     pub fn set_main_mute(&mut self, on: bool) {
-        self.command.set_button(Button::Mute, on).send(&self.device);
-        self.main_mute = on;
+        match self.command.set_button(Button::Mute, on).send(&self.device) {
+            Ok(_) => log::debug!("Set main mute to {}", on),
+            Err(e) => log::error!("Error setting main mute: {}", e),
+        }
     }
 
     pub fn set_main_mono(&mut self, on: bool) {
-        self.command.set_button(Button::Mono, on).send(&self.device);
-        self.main_mono = on;
+        match self.command.set_button(Button::Mono, on).send(&self.device) {
+            Ok(_) => log::debug!("Set main mono to {}", on),
+            Err(e) => log::error!("Error setting main mono: {}", e),
+        }
     }
 
     pub fn set_phantom_power(&mut self, on: bool) {
-        self.command
+        match self
+            .command
             .set_button(Button::Phantom, on)
-            .send(&self.device);
-        self.phantom_power = on;
+            .send(&self.device)
+        {
+            Ok(_) => log::debug!("Set phantom power to {}", on),
+            Err(e) => log::error!("Error setting phantom power: {}", e),
+        }
     }
 
     pub fn poll_state(&mut self) {
-        let dat = self.state.poll(&self.device);
+        match self.state.poll(&self.device) {
+            Ok(_) => {
+                // synch meters
+                let mut mic = [0.0; 8];
+                let mut adat = [0.0; 8];
+                let mut spdif = [0.0; 2];
+                let mut daw = [0.0; 18];
+                let mut bus = [0.0; 18];
 
-        if let Ok(d) = dat {
-            // synch meters
-            let mut mic = [0.0; 8];
-            let mut adat = [0.0; 8];
-            let mut spdif = [0.0; 2];
-            let mut daw = [0.0; 18];
-            let mut bus = [0.0; 18];
+                for (i, v) in mic.iter_mut().enumerate() {
+                    *v = gain_to_db(self.state.mic[i]);
+                }
+                for (i, v) in adat.iter_mut().enumerate() {
+                    *v = gain_to_db(self.state.adat[i]);
+                }
+                for (i, v) in spdif.iter_mut().enumerate() {
+                    *v = gain_to_db(self.state.spdif[i]);
+                }
+                for (i, v) in daw.iter_mut().enumerate() {
+                    *v = gain_to_db(self.state.daw[i]);
+                }
+                for (i, v) in bus.iter_mut().enumerate() {
+                    *v = gain_to_db(self.state.bus[i]);
+                }
 
-            for (i, v) in mic.iter_mut().enumerate() {
-                *v = gain_to_db(self.state.mic[i]);
-            }
-            for (i, v) in adat.iter_mut().enumerate() {
-                *v = gain_to_db(self.state.adat[i]);
-            }
-            for (i, v) in spdif.iter_mut().enumerate() {
-                *v = gain_to_db(self.state.spdif[i]);
-            }
-            for (i, v) in daw.iter_mut().enumerate() {
-                *v = gain_to_db(self.state.daw[i]);
-            }
-            for (i, v) in bus.iter_mut().enumerate() {
-                *v = gain_to_db(self.state.bus[i]);
-            }
+                let mut bus_index = 0;
+                for m in &mut self.mixes.iter_mut() {
+                    let mut channel_index = 0;
 
-            let mut bus_index = 0;
-            for m in &mut self.mixes.iter_mut() {
-                let mut channel_index = 0;
-
-                for v in mic {
-                    m.channel_strips[channel_index].meter.0 = v;
-                    if m.channel_strips[channel_index].meter.0 > -0.001 {
-                        m.channel_strips[channel_index].clip = true;
+                    for v in mic {
+                        m.channel_strips[channel_index].meter.0 = v;
+                        if m.channel_strips[channel_index].meter.0 > -0.001 {
+                            m.channel_strips[channel_index].clip = true;
+                        }
+                        channel_index += 1;
                     }
-                    channel_index += 1;
-                }
-                for v in spdif {
-                    m.channel_strips[channel_index].meter.0 = v;
-                    if m.channel_strips[channel_index].meter.0 > -0.001 {
-                        m.channel_strips[channel_index].clip = true;
+                    for v in spdif {
+                        m.channel_strips[channel_index].meter.0 = v;
+                        if m.channel_strips[channel_index].meter.0 > -0.001 {
+                            m.channel_strips[channel_index].clip = true;
+                        }
+                        channel_index += 1;
                     }
-                    channel_index += 1;
-                }
-                for v in adat {
-                    m.channel_strips[channel_index].meter.0 = v;
-                    if m.channel_strips[channel_index].meter.0 > -0.001 {
-                        m.channel_strips[channel_index].clip = true;
+                    for v in adat {
+                        m.channel_strips[channel_index].meter.0 = v;
+                        if m.channel_strips[channel_index].meter.0 > -0.001 {
+                            m.channel_strips[channel_index].clip = true;
+                        }
+                        channel_index += 1;
                     }
-                    channel_index += 1;
-                }
-                for v in daw {
-                    m.channel_strips[channel_index].meter.0 = v;
-                    if m.channel_strips[channel_index].meter.0 > -0.001 {
-                        m.channel_strips[channel_index].clip = true;
+                    for v in daw {
+                        m.channel_strips[channel_index].meter.0 = v;
+                        if m.channel_strips[channel_index].meter.0 > -0.001 {
+                            m.channel_strips[channel_index].clip = true;
+                        }
+                        channel_index += 1;
                     }
-                    channel_index += 1;
+
+                    m.bus_strip.meter.0 = bus[bus_index];
+                    if m.bus_strip.meter.0 > -0.001 {
+                        m.bus_strip.clip = true;
+                    }
+                    bus_index += 1;
+                    m.bus_strip.meter.1 = bus[bus_index];
+                    if m.bus_strip.meter.0 > -0.001 {
+                        m.bus_strip.clip = true;
+                    }
+                    bus_index += 1;
                 }
 
-                m.bus_strip.meter.0 = bus[bus_index];
-                if m.bus_strip.meter.0 > -0.001 {
-                    m.bus_strip.clip = true;
-                }
-                bus_index += 1;
-                m.bus_strip.meter.1 = bus[bus_index];
-                if m.bus_strip.meter.0 > -0.001 {
-                    m.bus_strip.clip = true;
-                }
-                bus_index += 1;
+                // synch button states
+                self.phantom_power = self.state.phantom == 0x01;
+                self.in_1_2_line = self.state.line == 0x01;
+                self.main_mute = self.state.mute == 0x01;
+                self.main_mono = self.state.mono == 0x01;
             }
-
-            // synch button states
-            self.phantom_power = self.state.phantom == 0x01;
-            self.in_1_2_line = self.state.line == 0x01;
-            self.main_mute = self.state.mute == 0x01;
-            self.main_mono = self.state.mono == 0x01;
+            Err(e) => log::error!("Error polling state: {}", e),
         }
     }
 
@@ -249,46 +260,90 @@ impl PreSonusStudio1824c {
                 if muted {
                     value = Value::Muted;
                 }
-                self.command
+                match self
+                    .command
                     .set_output_fader(self.mixes[mix_index].bus_strip.number, value)
-                    .send(&self.device);
+                    .send(&self.device)
+                {
+                    Ok(_) => {
+                        log::debug!(
+                            "Set output fader mix {} to {} dB",
+                            self.mixes[mix_index].bus_strip.number,
+                            fader
+                        );
+                    }
+                    Err(e) => log::error!("Error setting output fader: {}", e),
+                }
             }
             StripKind::Channel => {
                 let mut value = Value::DB(left);
                 if muted & !soloed {
                     value = Value::Muted;
                 }
-                self.command
+                match self
+                    .command
                     .set_input_fader(
                         channel_index as u32,
                         self.mixes[mix_index].bus_strip.number,
                         Channel::Left,
                         value,
                     )
-                    .send(&self.device);
+                    .send(&self.device)
+                {
+                    Ok(_) => {
+                        log::debug!(
+                            "Set input fader channel {} mix {} left to {} dB",
+                            channel_index,
+                            self.mixes[mix_index].bus_strip.number,
+                            left
+                        );
+                    }
+                    Err(e) => log::error!("Error setting input fader: {}", e),
+                }
 
                 value = Value::DB(right);
                 if muted & !soloed {
                     value = Value::Muted;
                 }
-                self.command
+                match self
+                    .command
                     .set_input_fader(
                         channel_index as u32,
                         self.mixes[mix_index].bus_strip.number,
                         Channel::Right,
                         value,
                     )
-                    .send(&self.device);
+                    .send(&self.device)
+                {
+                    Ok(_) => {
+                        log::debug!(
+                            "Set input fader channel {} mix {} right to {} dB",
+                            channel_index,
+                            self.mixes[mix_index].bus_strip.number,
+                            right
+                        );
+                    }
+                    Err(e) => log::error!("Error setting input fader: {}", e),
+                }
             }
         }
     }
 
     pub fn bypass_mixer(&mut self) {
+        log::debug!("Bypassing mixer...");
+
         // Set all stereo bus faders to unity gain
         for m in 0..9 {
-            self.command
+            match self
+                .command
                 .set_output_fader(m, Value::Unity)
-                .send(&self.device);
+                .send(&self.device)
+            {
+                Ok(_) => {
+                    log::debug!("Set output fader mix {} to unity", m);
+                }
+                Err(e) => log::error!("Error setting output fader: {}", e),
+            }
         }
 
         // Set:
@@ -311,26 +366,68 @@ impl PreSonusStudio1824c {
             daw_channel_right = daw_channel_left + 1;
             for c in 0..35 {
                 if c == daw_channel_left {
-                    self.command
+                    match self
+                        .command
                         .set_input_fader(c, m, Channel::Left, Value::Unity)
-                        .send(&self.device);
-                    self.command
+                        .send(&self.device)
+                    {
+                        Ok(_) => {
+                            log::debug!("Set input fader channel {} mix {} left to unity", c, m);
+                        }
+                        Err(e) => log::error!("Error setting input fader: {}", e),
+                    }
+                    match self
+                        .command
                         .set_input_fader(c, m, Channel::Right, Value::Muted)
-                        .send(&self.device);
+                        .send(&self.device)
+                    {
+                        Ok(_) => {
+                            log::debug!("Set input fader channel {} mix {} right to muted", c, m);
+                        }
+                        Err(e) => log::error!("Error setting input fader: {}", e),
+                    }
                 } else if c == daw_channel_right {
-                    self.command
+                    match self
+                        .command
                         .set_input_fader(c, m, Channel::Left, Value::Muted)
-                        .send(&self.device);
-                    self.command
+                        .send(&self.device)
+                    {
+                        Ok(_) => {
+                            log::debug!("Set input fader channel {} mix {} left to muted", c, m);
+                        }
+                        Err(e) => log::error!("Error setting input fader: {}", e),
+                    }
+                    match self
+                        .command
                         .set_input_fader(c, m, Channel::Right, Value::Unity)
-                        .send(&self.device);
+                        .send(&self.device)
+                    {
+                        Ok(_) => {
+                            log::debug!("Set input fader channel {} mix {} right to unity", c, m);
+                        }
+                        Err(e) => log::error!("Error setting input fader: {}", e),
+                    }
                 } else {
-                    self.command
+                    match self
+                        .command
                         .set_input_fader(c, m, Channel::Left, Value::Muted)
-                        .send(&self.device);
-                    self.command
+                        .send(&self.device)
+                    {
+                        Ok(_) => {
+                            log::debug!("Set input fader channel {} mix {} left to muted", c, m);
+                        }
+                        Err(e) => log::error!("Error setting input fader: {}", e),
+                    }
+                    match self
+                        .command
                         .set_input_fader(c, m, Channel::Right, Value::Muted)
-                        .send(&self.device);
+                        .send(&self.device)
+                    {
+                        Ok(_) => {
+                            log::debug!("Set input fader channel {} mix {} right to muted", c, m);
+                        }
+                        Err(e) => log::error!("Error setting input fader: {}", e),
+                    }
                 }
             }
         }
