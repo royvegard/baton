@@ -1,30 +1,9 @@
+use baton_studio::*;
 use core::time::Duration;
-use futures_lite::future::block_on;
-use nusb::{
-    transfer::{ControlIn, ControlOut, ControlType, Recipient, ResponseBuffer, TransferError},
-    Device,
-};
+use nusb::{Device, MaybeFuture};
 use serde::{Deserialize, Serialize};
-use std::io::{self, ErrorKind};
-
-// Modes
-const MODE_BUTTON: u32 = 0x00;
-const MODE_CHANNEL_STRIP: u32 = 0x64;
-const MODE_BUS_STRIP: u32 = 0x65;
-
-// Buttons
-const BUTTON_1_2_LINE: u32 = 0x00;
-const BUTTON_MAIN_MUTE: u32 = 0x01;
-const BUTTON_MAIN_MONO: u32 = 0x02;
-const BUTTON_PHANTOM_POWER: u32 = 0x04;
-
-// Output channels
-const LEFT: u32 = 0x00;
-const RIGHT: u32 = 0x01;
-
-// Fader presets
-const MUTED: u32 = 0x00;
-const CHANNEL_UNITY: u32 = 0x0100_0000;
+use std::error::Error;
+use std::num::NonZero;
 
 pub struct PreSonusStudio1824c {
     pub device: Device,
@@ -39,19 +18,14 @@ pub struct PreSonusStudio1824c {
 }
 
 impl PreSonusStudio1824c {
-    pub fn new() -> Result<Self, io::Error> {
-        let device_info = match nusb::list_devices()?
+    pub fn new() -> Result<Self, Box<dyn Error>> {
+        let device_info = nusb::list_devices()
+            .wait()?
             .find(|dev| dev.vendor_id() == 0x194f && dev.product_id() == 0x010d)
-        {
-            Some(d) => d,
-            None => {
-                log::error!("Presonus STUDIO1824c not found");
-                return Err(io::Error::new(
-                    ErrorKind::NotFound,
-                    "PreSonus STUDIO1824c not found",
-                ));
-            }
-        };
+            .ok_or(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "device not found",
+            ))?;
 
         log::info!(
             "Found Manufacturer: {}, Product: {}, Serial: {}",
@@ -69,7 +43,7 @@ impl PreSonusStudio1824c {
             );
         }
 
-        let device = device_info.open()?;
+        let device = device_info.open().wait()?;
         log::info!("Opened device");
 
         let number_of_channels = 18;
@@ -84,7 +58,10 @@ impl PreSonusStudio1824c {
 
         let timeout = Duration::from_millis(100);
         let mut i = 1;
-        while let Ok(d) = device.get_string_descriptor(i, 0, timeout) {
+        while let Ok(d) = device
+            .get_string_descriptor(NonZero::new(i).unwrap(), 0, timeout)
+            .wait()
+        {
             log::debug!("Descriptor {}: {}", i, d);
             desc.push(d);
             i += 1;
@@ -127,59 +104,31 @@ impl PreSonusStudio1824c {
     }
 
     pub fn set_1_2_line(&mut self, on: bool) {
-        let b: u32 = if on { 0x01 } else { 0x00 };
-        self.command.mode = MODE_BUTTON;
-        self.command.input_strip = 0x00;
-        self.command.output_bus = 0x00;
-        self.command.output_channel = BUTTON_1_2_LINE;
-        self.command.value = b;
-
-        let _ = self.command.send_usb_command(&self.device);
+        self.command.set_button(Button::Line, on).send(&self.device);
         self.in_1_2_line = on;
     }
 
     pub fn set_main_mute(&mut self, on: bool) {
-        let b: u32 = if on { 0x01 } else { 0x00 };
-        self.command.mode = MODE_BUTTON;
-        self.command.input_strip = 0x00;
-        self.command.output_bus = 0x00;
-        self.command.output_channel = BUTTON_MAIN_MUTE;
-        self.command.value = b;
-
-        let _ = self.command.send_usb_command(&self.device);
+        self.command.set_button(Button::Mute, on).send(&self.device);
         self.main_mute = on;
     }
 
     pub fn set_main_mono(&mut self, on: bool) {
-        let b: u32 = if on { 0x01 } else { 0x00 };
-        self.command.mode = MODE_BUTTON;
-        self.command.input_strip = 0x00;
-        self.command.output_bus = 0x00;
-        self.command.output_channel = BUTTON_MAIN_MONO;
-        self.command.value = b;
-
-        let _ = self.command.send_usb_command(&self.device);
+        self.command.set_button(Button::Mono, on).send(&self.device);
         self.main_mono = on;
     }
 
     pub fn set_phantom_power(&mut self, on: bool) {
-        let b: u32 = if on { 0x01 } else { 0x00 };
-        self.command.mode = MODE_BUTTON;
-        self.command.input_strip = 0x00;
-        self.command.output_bus = 0x00;
-        self.command.output_channel = BUTTON_PHANTOM_POWER;
-        self.command.value = b;
-
-        let _ = self.command.send_usb_command(&self.device);
+        self.command
+            .set_button(Button::Phantom, on)
+            .send(&self.device);
         self.phantom_power = on;
     }
 
     pub fn poll_state(&mut self) {
-        let dat = self.state.poll_usb_data(&self.device);
+        let dat = self.state.poll(&self.device);
 
         if let Ok(d) = dat {
-            self.state.parse_state(d);
-
             // synch meters
             let mut mic = [0.0; 8];
             let mut adat = [0.0; 8];
@@ -188,19 +137,19 @@ impl PreSonusStudio1824c {
             let mut bus = [0.0; 18];
 
             for (i, v) in mic.iter_mut().enumerate() {
-                *v = State::get_db(self.state.mic[i]);
+                *v = gain_to_db(self.state.mic[i]);
             }
             for (i, v) in adat.iter_mut().enumerate() {
-                *v = State::get_db(self.state.adat[i]);
+                *v = gain_to_db(self.state.adat[i]);
             }
             for (i, v) in spdif.iter_mut().enumerate() {
-                *v = State::get_db(self.state.spdif[i]);
+                *v = gain_to_db(self.state.spdif[i]);
             }
             for (i, v) in daw.iter_mut().enumerate() {
-                *v = State::get_db(self.state.daw[i]);
+                *v = gain_to_db(self.state.daw[i]);
             }
             for (i, v) in bus.iter_mut().enumerate() {
-                *v = State::get_db(self.state.bus[i]);
+                *v = gain_to_db(self.state.bus[i]);
             }
 
             let mut bus_index = 0;
@@ -296,51 +245,50 @@ impl PreSonusStudio1824c {
         let (left, right) = strip.pan_rule(PanLaw::Exponential);
         match strip.kind {
             StripKind::Main | StripKind::Bus => {
-                self.command.input_strip = self.mixes[mix_index].bus_strip.number;
-                self.command.mode = MODE_BUS_STRIP;
-                self.command.output_bus = 0x00;
-
-                self.command.output_channel = LEFT;
-                self.command.set_db(fader);
+                let mut value = Value::DB(fader);
                 if muted {
-                    self.command.value = MUTED;
+                    value = Value::Muted;
                 }
-                let _ = self.command.send_usb_command(&self.device);
+                self.command
+                    .set_output_fader(self.mixes[mix_index].bus_strip.number, value)
+                    .send(&self.device);
             }
             StripKind::Channel => {
-                let output_bus = &self.mixes[mix_index].bus_strip;
-                self.command.input_strip = channel_index as u32;
-                self.command.mode = MODE_CHANNEL_STRIP;
-                self.command.output_bus = output_bus.number;
-
-                self.command.output_channel = LEFT;
-                self.command.set_db(left);
+                let mut value = Value::DB(left);
                 if muted & !soloed {
-                    self.command.value = MUTED;
+                    value = Value::Muted;
                 }
-                let _ = self.command.send_usb_command(&self.device);
+                self.command
+                    .set_input_fader(
+                        channel_index as u32,
+                        self.mixes[mix_index].bus_strip.number,
+                        Channel::Left,
+                        value,
+                    )
+                    .send(&self.device);
 
-                self.command.output_channel = RIGHT;
-                self.command.set_db(right);
+                value = Value::DB(right);
                 if muted & !soloed {
-                    self.command.value = MUTED;
+                    value = Value::Muted;
                 }
-                let _ = self.command.send_usb_command(&self.device);
+                self.command
+                    .set_input_fader(
+                        channel_index as u32,
+                        self.mixes[mix_index].bus_strip.number,
+                        Channel::Right,
+                        value,
+                    )
+                    .send(&self.device);
             }
         }
     }
 
     pub fn bypass_mixer(&mut self) {
-        // Set all bus faders to unity gain
-        self.command.mode = MODE_BUS_STRIP;
-        self.command.value = CHANNEL_UNITY;
-
-        for m in 0..self.mixes.len() {
-            self.command.input_strip = m as u32;
-            self.command.output_channel = LEFT;
-            let _ = self.command.send_usb_command(&self.device);
-            self.command.output_channel = RIGHT;
-            let _ = self.command.send_usb_command(&self.device);
+        // Set all stereo bus faders to unity gain
+        for m in 0..9 {
+            self.command
+                .set_output_fader(m, Value::Unity)
+                .send(&self.device);
         }
 
         // Set:
@@ -355,118 +303,37 @@ impl PreSonusStudio1824c {
         // Daw 17 -> ADAT out 7, Daw 18 -> ADAT out 8
         // Everything else muted
 
-        let channel_strips = self.mixes[0].channel_strips.len();
-        self.command.mode = MODE_CHANNEL_STRIP;
-        self.command.value = MUTED;
         let mut daw_channel_left = 16;
         let mut daw_channel_right;
 
-        for m in 0..self.mixes.len() {
+        for m in 0..9 {
             daw_channel_left += 2;
             daw_channel_right = daw_channel_left + 1;
-            self.command.output_bus = m as u32;
-            for c in 0..channel_strips {
-                self.command.input_strip = c as u32;
+            for c in 0..35 {
                 if c == daw_channel_left {
-                    self.command.value = CHANNEL_UNITY;
-                    self.command.output_channel = LEFT;
-                    let _ = self.command.send_usb_command(&self.device);
-                    self.command.value = MUTED;
-                    self.command.output_channel = RIGHT;
-                    let _ = self.command.send_usb_command(&self.device);
+                    self.command
+                        .set_input_fader(c, m, Channel::Left, Value::Unity)
+                        .send(&self.device);
+                    self.command
+                        .set_input_fader(c, m, Channel::Right, Value::Muted)
+                        .send(&self.device);
                 } else if c == daw_channel_right {
-                    self.command.value = MUTED;
-                    self.command.output_channel = LEFT;
-                    let _ = self.command.send_usb_command(&self.device);
-                    self.command.value = CHANNEL_UNITY;
-                    self.command.output_channel = RIGHT;
-                    let _ = self.command.send_usb_command(&self.device);
+                    self.command
+                        .set_input_fader(c, m, Channel::Left, Value::Muted)
+                        .send(&self.device);
+                    self.command
+                        .set_input_fader(c, m, Channel::Right, Value::Unity)
+                        .send(&self.device);
                 } else {
-                    self.command.value = MUTED;
-                    self.command.output_channel = LEFT;
-                    let _ = self.command.send_usb_command(&self.device);
-                    self.command.output_channel = RIGHT;
-                    let _ = self.command.send_usb_command(&self.device);
+                    self.command
+                        .set_input_fader(c, m, Channel::Left, Value::Muted)
+                        .send(&self.device);
+                    self.command
+                        .set_input_fader(c, m, Channel::Right, Value::Muted)
+                        .send(&self.device);
                 }
             }
         }
-    }
-}
-
-pub struct Command {
-    pub mode: u32,
-    pub input_strip: u32,
-    fix1: u32,
-    fix2: u32,
-    pub output_bus: u32,
-    pub output_channel: u32,
-    pub value: u32,
-}
-
-impl Command {
-    pub fn new() -> Self {
-        Command {
-            mode: MODE_CHANNEL_STRIP,
-            input_strip: 0x00,
-            fix1: 0x50617269,
-            fix2: 0x14,
-            output_bus: 0x04,
-            output_channel: LEFT,
-            value: 0x00000000,
-        }
-    }
-
-    pub fn as_array(&self) -> [u8; 28] {
-        let mut arr = [0u8; 28];
-        let mut i = 0;
-
-        for b in self.mode.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.input_strip.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.fix1.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.fix2.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.output_bus.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.output_channel.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.value.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-
-        arr
-    }
-
-    pub fn set_db(&mut self, db: f64) {
-        self.value = (CHANNEL_UNITY as f64 * 10.0_f64.powf(db.clamp(-96.0, 10.0) / 20.0)) as u32;
-    }
-
-    pub fn send_usb_command(&self, device: &Device) -> Result<ResponseBuffer, TransferError> {
-        let fader_control: ControlOut = ControlOut {
-            control_type: ControlType::Vendor,
-            recipient: Recipient::Device,
-            request: 160,
-            value: 0x0000,
-            index: 0,
-            data: &self.as_array(),
-        };
-
-        block_on(device.control_out(fader_control)).into_result()
     }
 }
 
@@ -645,225 +512,5 @@ impl Mix {
                 }
             }
         }
-    }
-}
-
-pub struct State {
-    counter: u16,
-    d1: u32,
-    d2: u32,
-    fix1: u32,
-    fix2: u32,
-    /// Microphone input meters.
-    mic: [u32; 8],
-    /// S/PDIF input meters.
-    spdif: [u32; 2],
-    /// ADAT input meters.
-    adat: [u32; 8],
-    /// DAW input meters.
-    daw: [u32; 18],
-    /// Stereo busses meters.
-    bus: [u32; 18],
-    /// 48V phantom power.
-    pub phantom: u32,
-    /// Channel 1-2 line mode.
-    pub line: u32,
-    /// Main mix mute.
-    pub mute: u32,
-    /// Main mix mono.
-    pub mono: u32,
-    d5: u32,
-}
-
-impl State {
-    fn new() -> Self {
-        State {
-            counter: 0x01,
-            d1: 0x00,
-            d2: 0x00,
-            fix1: 0x64656d73,
-            fix2: 0xf4,
-            mic: [0x00; 8],
-            spdif: [0x00; 2],
-            adat: [0x00; 8],
-            daw: [0x00; 18],
-            bus: [0x00; 18],
-            phantom: 0x00,
-            line: 0x00,
-            mute: 0x00,
-            mono: 0x00,
-            d5: 0x00,
-        }
-    }
-
-    /// Reset all values to zero.
-    /// This is used before requesting state from device.
-    fn reset(&mut self) {
-        self.d1 = 0x00;
-        self.d2 = 0x00;
-        self.fix1 = 0x64656d73;
-        self.fix2 = 0xf4;
-        self.mic = [0x00; 8];
-        self.spdif = [0x00; 2];
-        self.adat = [0x00; 8];
-        self.daw = [0x00; 18];
-        self.bus = [0x00; 18];
-        self.phantom = 0x00;
-        self.line = 0x00;
-        self.mute = 0x00;
-        self.mono = 0x00;
-        self.d5 = 0x00;
-    }
-
-    /// Return the state as an array of bytes.
-    fn as_array(&self) -> [u8; 252] {
-        let mut arr = [0u8; 252];
-        let mut i = 0;
-
-        for b in self.d1.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.d2.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.fix1.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.fix2.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for m in self.mic {
-            for b in m.to_le_bytes() {
-                arr[i] = b;
-                i += 1;
-            }
-        }
-        for m in self.spdif {
-            for b in m.to_le_bytes() {
-                arr[i] = b;
-                i += 1;
-            }
-        }
-        for m in self.adat {
-            for b in m.to_le_bytes() {
-                arr[i] = b;
-                i += 1;
-            }
-        }
-        for m in self.daw {
-            for b in m.to_le_bytes() {
-                arr[i] = b;
-                i += 1;
-            }
-        }
-        for m in self.bus {
-            for b in m.to_le_bytes() {
-                arr[i] = b;
-                i += 1;
-            }
-        }
-        for b in self.phantom.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.line.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.mute.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.mono.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-        for b in self.d5.to_le_bytes() {
-            arr[i] = b;
-            i += 1;
-        }
-
-        arr
-    }
-
-    /// Convert a slice of 4 bytes to a u32.
-    fn slice_to_u32(slice: &[u8]) -> u32 {
-        let mut out: u32 = slice[0] as u32;
-        out += slice[1] as u32 * 0x100;
-        out += slice[2] as u32 * 0x100 * 0x100;
-        out += slice[3] as u32 * 0x100 * 0x100 * 0x100;
-
-        out
-    }
-
-    fn parse_state(&mut self, slice: Vec<u8>) {
-        const MIC_INDEX: usize = 0x10;
-        const ADAT_INDEX: usize = 0x38;
-        const SPDIF_INDEX: usize = 0x30;
-        const DAW_INDEX: usize = 0x58;
-        const BUS_INDEX: usize = 0xa0;
-
-        for i in 0..self.mic.len() {
-            self.mic[i] = Self::slice_to_u32(&slice[MIC_INDEX + 4 * i..=MIC_INDEX + 4 * i + 4]);
-        }
-        for i in 0..self.adat.len() {
-            self.adat[i] = Self::slice_to_u32(&slice[ADAT_INDEX + 4 * i..=ADAT_INDEX + 4 * i + 4]);
-        }
-        for i in 0..self.spdif.len() {
-            self.spdif[i] =
-                Self::slice_to_u32(&slice[SPDIF_INDEX + 4 * i..=SPDIF_INDEX + 4 * i + 4]);
-        }
-        for i in 0..self.daw.len() {
-            self.daw[i] = Self::slice_to_u32(&slice[DAW_INDEX + 4 * i..=DAW_INDEX + 4 * i + 4]);
-        }
-        for i in 0..self.bus.len() {
-            self.bus[i] = Self::slice_to_u32(&slice[BUS_INDEX + 4 * i..=BUS_INDEX + 4 * i + 4]);
-        }
-
-        self.phantom = slice[0xe8] as u32;
-        self.line = slice[0xec] as u32;
-        self.mute = slice[0xf0] as u32;
-        self.mono = slice[0xf4] as u32;
-    }
-
-    /// Convert from integer amplitude to db amplitude.
-    fn get_db(input: u32) -> f64 {
-        const ZERO_DBFS: u32 = 0x8000_0000;
-        20.0 * (input as f64 / ZERO_DBFS as f64).log10()
-    }
-
-    fn poll_usb_data(&mut self, device: &Device) -> Result<Vec<u8>, TransferError> {
-        self.reset();
-
-        let control: ControlOut = ControlOut {
-            control_type: ControlType::Vendor,
-            recipient: Recipient::Device,
-            request: 161,
-            value: self.counter.to_le(),
-            index: 0,
-            data: &self.as_array(),
-        };
-
-        let _ = block_on(device.control_out(control)).into_result();
-
-        let control: ControlIn = ControlIn {
-            control_type: ControlType::Vendor,
-            recipient: Recipient::Device,
-            request: 162,
-            value: self.counter.to_le(),
-            index: 0,
-            length: self.as_array().len() as u16,
-        };
-
-        if self.counter == 0xffff {
-            self.counter = 0x00;
-        }
-        self.counter += 1;
-
-        block_on(device.control_in(control)).into_result()
     }
 }
