@@ -1,8 +1,8 @@
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use flexi_logger::{FileSpec, detailed_format};
 use pan::Pan;
 use ratatui::{
     DefaultTerminal, Frame,
+    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     layout::{Constraint, Layout, Margin},
     style::{Color, Style, Stylize},
     text::{Line, Span},
@@ -15,6 +15,8 @@ use std::{
     time::{Duration, Instant},
 };
 use std::{io, path::Path};
+use tui_input::Input;
+use tui_input::backend::crossterm::EventHandler;
 use usb::StripKind;
 
 mod pan;
@@ -37,6 +39,13 @@ fn main() -> io::Result<()> {
     app_result
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum InputMode {
+    #[default]
+    Normal,
+    Editing,
+}
+
 pub struct App {
     exit: bool,
     active_mix_index: usize,
@@ -48,6 +57,8 @@ pub struct App {
     ps: usb::PreSonusStudio1824c,
     last_tick: Instant,
     bypass: bool,
+    input: Input,
+    input_mode: InputMode,
 }
 
 impl App {
@@ -63,6 +74,8 @@ impl App {
             ps: usb::PreSonusStudio1824c::new().expect("Failed to open device"),
             last_tick: Instant::now(),
             bypass: false,
+            input: Input::default(),
+            input_mode: InputMode::Normal,
         };
 
         app.set_active_strip(app.active_strip_index as isize);
@@ -232,20 +245,89 @@ impl App {
             self.faders_barchart(&self.ps.mixes[self.active_mix_index]),
             strips_area,
         );
-        frame.render_widget(
-            Paragraph::new(status_line).block(Block::bordered().title("Status")),
-            status_area,
-        );
+
+        if self.input_mode == InputMode::Editing {
+            let width = status_area.width.max(3) - 3;
+            let style = Style::default();
+            let scroll = self.input.visual_scroll(width as usize);
+            let input = Paragraph::new(self.input.value())
+                .style(style)
+                .scroll((0, scroll as u16))
+                .block(Block::bordered().title("Rename"));
+            frame.render_widget(input, status_area);
+            if self.input_mode == InputMode::Editing {
+                // Ratatui hides the cursor unless it's explicitly set. Position the  cursor past the
+                // end of the input text and one line down from the border to the input line
+                let x = self.input.visual_cursor().max(scroll) - scroll + 1;
+                frame.set_cursor_position((status_area.x + x as u16, status_area.y + 1))
+            }
+        } else {
+            frame.render_widget(
+                Paragraph::new(status_line).block(Block::bordered().title("Status")),
+                status_area,
+            );
+        }
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
-        match event::read()? {
+        let event = event::read()?;
+        match event {
             Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
-                self.handle_key_event(key_event)
+                match self.input_mode {
+                    InputMode::Normal => self.handle_key_event(key_event),
+                    InputMode::Editing => match key_event.code {
+                        KeyCode::Enter => self.push_message(),
+                        KeyCode::Esc => self.stop_editing(),
+                        _ => {
+                            self.input.handle_event(&event);
+                        }
+                    },
+                }
             }
             _ => {}
         };
         Ok(())
+    }
+
+    fn push_message(&mut self) {
+        match self.ps.mixes[self.active_mix_index]
+            .get_strip(self.active_strip_index)
+            .kind
+        {
+            StripKind::Channel => {
+                self.ps.mixes[0].channel_strips[self.active_strip_index].name =
+                    self.input.value_and_reset();
+            }
+            StripKind::Bus | StripKind::Main => {
+                self.ps.mixes[self.active_mix_index].bus_strip.name = self.input.value_and_reset();
+            }
+        }
+
+        self.input_mode = InputMode::Normal;
+    }
+
+    fn stop_editing(&mut self) {
+        self.input_mode = InputMode::Normal;
+    }
+
+    fn start_editing(&mut self) {
+        match self.ps.mixes[self.active_mix_index]
+            .get_strip(self.active_strip_index)
+            .kind
+        {
+            StripKind::Channel => {
+                self.input = Input::new(self.ps.channel_name(self.active_strip_index).to_string());
+            }
+            StripKind::Bus | StripKind::Main => {
+                self.input = Input::new(
+                    self.ps.mixes[self.active_mix_index]
+                        .bus_strip
+                        .name
+                        .to_string(),
+                );
+            }
+        }
+        self.input_mode = InputMode::Editing;
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
@@ -268,6 +350,7 @@ impl App {
             KeyCode::Char('s') => self.toggle_solo(),
             KeyCode::Char('b') => self.toggle_bypass(),
             KeyCode::Char(' ') => self.clear_clip_indicators(),
+            KeyCode::Char('r') => self.start_editing(),
             KeyCode::PageDown => self.increment_meter_heigth(1),
             KeyCode::PageUp => self.increment_meter_heigth(-1),
             KeyCode::Char('x') => {
