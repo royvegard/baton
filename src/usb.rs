@@ -5,16 +5,33 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::num::NonZero;
 
+#[derive(Deserialize, Serialize)]
+#[serde(default)]
 pub struct PreSonusStudio1824c {
-    pub device: Device,
+    #[serde(skip)]
+    device: Device,
+    #[serde(skip)]
     pub command: Command,
+    #[serde(skip)]
     pub state: State,
+    pub channel_names: Vec<String>,
     pub mixes: Vec<Mix>,
+    #[serde(skip)]
     pub in_1_2_line: bool,
+    #[serde(skip)]
     pub main_mute: bool,
+    #[serde(skip)]
     pub main_mono: bool,
+    #[serde(skip)]
     pub phantom_power: bool,
+    #[serde(skip)]
     descriptor: Vec<String>,
+}
+
+impl Default for PreSonusStudio1824c {
+    fn default() -> Self {
+        PreSonusStudio1824c::new().unwrap()
+    }
 }
 
 impl PreSonusStudio1824c {
@@ -81,16 +98,17 @@ impl PreSonusStudio1824c {
             command: Command::new(),
             state: State::new(),
             mixes: vec![
-                Mix::new(&channel_name, String::from("MAIN 1-2"), StripKind::Main, 0),
-                Mix::new(&channel_name, String::from("MIX 3-4"), StripKind::Bus, 1),
-                Mix::new(&channel_name, String::from("MIX 5-6"), StripKind::Bus, 2),
-                Mix::new(&channel_name, String::from("MIX 7-8"), StripKind::Bus, 3),
-                Mix::new(&channel_name, String::from("S/PDIF"), StripKind::Bus, 4),
-                Mix::new(&channel_name, String::from("ADAT 1-2"), StripKind::Bus, 5),
-                Mix::new(&channel_name, String::from("ADAT 3-4"), StripKind::Bus, 6),
-                Mix::new(&channel_name, String::from("ADAT 5-6"), StripKind::Bus, 7),
-                Mix::new(&channel_name, String::from("ADAT 7-8"), StripKind::Bus, 8),
+                Mix::new(String::from("MAIN 1-2"), StripKind::Main, 0, channel_name.len()),
+                Mix::new(String::from("MIX 3-4"), StripKind::Bus, 1, channel_name.len()),
+                Mix::new(String::from("MIX 5-6"), StripKind::Bus, 2, channel_name.len()),
+                Mix::new(String::from("MIX 7-8"), StripKind::Bus, 3, channel_name.len()),
+                Mix::new(String::from("S/PDIF"), StripKind::Bus, 4, channel_name.len()),
+                Mix::new(String::from("ADAT 1-2"), StripKind::Bus, 5, channel_name.len()),
+                Mix::new(String::from("ADAT 3-4"), StripKind::Bus, 6, channel_name.len()),
+                Mix::new(String::from("ADAT 5-6"), StripKind::Bus, 7, channel_name.len()),
+                Mix::new(String::from("ADAT 7-8"), StripKind::Bus, 8, channel_name.len()),
             ],
+            channel_names: channel_name,
             in_1_2_line: false,
             main_mute: false,
             main_mono: false,
@@ -100,7 +118,7 @@ impl PreSonusStudio1824c {
     }
 
     pub fn channel_name(&self, index: usize) -> &str {
-        self.mixes[0].channel_strips[index].name.as_str()
+        self.channel_names[index].as_str()
     }
 
     pub fn set_1_2_line(&mut self, on: bool) {
@@ -234,23 +252,24 @@ impl PreSonusStudio1824c {
         }
     }
 
-    pub fn load_state(&mut self, state: &str) {
-        let state: Vec<Mix> = serde_json::from_str(state).unwrap();
+    pub fn load_config(&mut self, config: &str) {
+        let ps_state = serde_json::from_str::<PreSonusStudio1824c>(config).unwrap();
+        self.channel_names = ps_state.channel_names;
 
+        let mix_state = ps_state.mixes;
         for i in 0..self.mixes.len() {
             for j in 0..self.mixes[i].channel_strips.len() {
-                self.mixes[i].channel_strips[j].name = state[i].channel_strips[j].name.clone();
-                self.mixes[i].channel_strips[j].fader = state[i].channel_strips[j].fader;
-                self.mixes[i].channel_strips[j].balance = state[i].channel_strips[j].balance;
-                self.mixes[i].channel_strips[j].solo = state[i].channel_strips[j].solo;
-                self.mixes[i].channel_strips[j].mute = state[i].channel_strips[j].mute;
+                self.mixes[i].channel_strips[j].fader = mix_state[i].channel_strips[j].fader;
+                self.mixes[i].channel_strips[j].balance = mix_state[i].channel_strips[j].balance;
+                self.mixes[i].channel_strips[j].solo = mix_state[i].channel_strips[j].solo;
+                self.mixes[i].channel_strips[j].mute = mix_state[i].channel_strips[j].mute;
                 self.mixes[i].channel_strips[j].mute_by_solo =
-                    state[i].channel_strips[j].mute_by_solo;
+                    mix_state[i].channel_strips[j].mute_by_solo;
             }
 
-            self.mixes[i].bus_strip.name = state[i].bus_strip.name.clone();
-            self.mixes[i].bus_strip.fader = state[i].bus_strip.fader;
-            self.mixes[i].bus_strip.mute = state[i].bus_strip.mute;
+            self.mixes[i].name = mix_state[i].name.clone();
+            self.mixes[i].bus_strip.fader = mix_state[i].bus_strip.fader;
+            self.mixes[i].bus_strip.mute = mix_state[i].bus_strip.mute;
         }
     }
 
@@ -467,8 +486,6 @@ pub enum PanLaw {
 
 #[derive(Default, Deserialize, Serialize)]
 pub struct Strip {
-    /// Strip name.
-    pub name: String,
     /// Volume fader in dB.
     pub fader: f64,
     /// Left and right meter in dBFS.
@@ -535,22 +552,22 @@ impl Strip {
 /// that route to the destination.
 #[derive(Deserialize, Serialize)]
 pub struct Mix {
+    pub name: String,
     pub channel_strips: Vec<Strip>,
     pub bus_strip: Strip,
 }
 
 impl Mix {
     pub fn new(
-        channel_names: &[String],
         mix_name: String,
         mix_kind: StripKind,
         mix_number: u32,
+        number_of_channels: usize,
     ) -> Self {
         let mut channel_strips = Vec::<Strip>::new();
 
-        for (i, n) in channel_names.iter().enumerate() {
+        for i in 0..number_of_channels {
             let strip = Strip {
-                name: n.to_string(),
                 active: false,
                 fader: 0.0,
                 meter: (-f64::INFINITY, -f64::INFINITY),
@@ -570,7 +587,6 @@ impl Mix {
         }
 
         let bus_strip = Strip {
-            name: mix_name,
             active: false,
             fader: 0.0,
             meter: (-f64::INFINITY, -f64::INFINITY),
@@ -587,6 +603,7 @@ impl Mix {
         };
 
         Mix {
+            name: mix_name,
             channel_strips,
             bus_strip,
         }

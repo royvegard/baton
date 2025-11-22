@@ -100,7 +100,7 @@ impl App {
         let tick_rate = Duration::from_millis(100);
         self.last_tick = Instant::now();
 
-        // Load state
+        // Load config
         let config_file = match env::var("HOME") {
             Ok(h) => format!("{h}/.baton.json"),
             Err(_) => "baton.json".to_string(),
@@ -113,7 +113,7 @@ impl App {
             Ok(mut f) => {
                 let mut serialized = String::new();
                 f.read_to_string(&mut serialized).unwrap();
-                self.ps.load_state(&serialized);
+                self.ps.load_config(&serialized);
                 self.ps.write_state();
             }
         }
@@ -131,8 +131,8 @@ impl App {
             }
         }
 
-        // Save state
-        let serialized = serde_json::to_string_pretty(&self.ps.mixes).unwrap();
+        // Save config
+        let serialized = serde_json::to_string_pretty(&self.ps).unwrap();
         let mut file = File::create(path).unwrap();
         file.write_all(serialized.as_bytes()).unwrap();
         file.flush().unwrap();
@@ -158,10 +158,15 @@ impl App {
         // Compose status text
         self.status_line.clear();
         let active_strip = &self.ps.mixes[self.active_mix_index].get_strip(self.active_strip_index);
+        let name = if self.active_strip_index < self.ps.channel_names.len() {
+            self.ps.channel_name(self.active_strip_index)
+        } else {
+            &self.ps.mixes[self.active_mix_index].name
+        }; 
 
         self.status_line.push_str(&format!(
             "{} ({:>5.1} dB) balance: {}, solo: {}, mute: {}, mute_by_solo: {}, meter: {:>.3}, meter height: {}",
-            active_strip.name,
+            name,
             active_strip.fader,
             active_strip.balance,
             active_strip.solo,
@@ -303,11 +308,11 @@ impl App {
             .kind
         {
             StripKind::Channel => {
-                self.ps.mixes[0].channel_strips[self.active_strip_index].name =
+                self.ps.channel_names[self.active_strip_index] =
                     self.input.value_and_reset();
             }
             StripKind::Bus | StripKind::Main => {
-                self.ps.mixes[self.active_mix_index].bus_strip.name = self.input.value_and_reset();
+                self.ps.mixes[self.active_mix_index].name = self.input.value_and_reset();
             }
         }
 
@@ -346,12 +351,7 @@ impl App {
                 self.input = Input::new(self.ps.channel_name(self.active_strip_index).to_string());
             }
             StripKind::Bus | StripKind::Main => {
-                self.input = Input::new(
-                    self.ps.mixes[self.active_mix_index]
-                        .bus_strip
-                        .name
-                        .to_string(),
-                );
+                self.input = Input::new(self.ps.mixes[self.active_mix_index].name.to_string());
             }
         }
         self.input_mode = InputMode::Rename;
@@ -561,8 +561,8 @@ impl App {
             .enumerate()
             .map(|(i, strip)| self.fader_bar(strip, self.ps.channel_name(i)))
             .collect();
-        bars.push(self.fader_bar(&mix.bus_strip, &mix.bus_strip.name));
-        let title = self.ps.mixes[self.active_mix_index].bus_strip.name.as_str();
+        bars.push(self.fader_bar(&mix.bus_strip, &mix.name));
+        let title = self.ps.mixes[self.active_mix_index].name.as_str();
         let title = Line::from(title).centered().bold();
 
         BarChart::default()
@@ -653,8 +653,8 @@ impl App {
             })
             .collect();
         let dest = &mix.bus_strip;
-        bars.push(self.meter_bar(dest, &mix.bus_strip.name, dest.meter.0, dest.meter_max.0));
-        bars.push(self.meter_bar(dest, &mix.bus_strip.name, dest.meter.1, dest.meter_max.1));
+        bars.push(self.meter_bar(dest, &mix.name, dest.meter.0, dest.meter_max.0));
+        bars.push(self.meter_bar(dest, &mix.name, dest.meter.1, dest.meter_max.1));
         let title = "Meters";
         let title = Line::from(title).centered().bold();
 
