@@ -281,7 +281,7 @@ impl PreSonusStudio1824c {
     }
 
     pub fn write_channel_fader(&mut self, mix_index: usize, channel_index: usize) {
-        let strip = self.mixes[mix_index].get_strip(channel_index);
+        let strip = self.mixes[mix_index].strips.iter().nth(channel_index).unwrap();
         let muted = strip.mute | strip.mute_by_solo;
         let soloed = strip.solo;
 
@@ -675,14 +675,6 @@ impl Mix {
                 bus_strip,
             },
         }
-    }
-
-    pub fn get_strip(&self, index: usize) -> &Strip {
-        self.strips.iter().nth(index).unwrap()
-    }
-
-    pub fn get_mut_strip(&mut self, index: usize) -> &mut Strip {
-        self.strips.iter_mut().nth(index).unwrap()
     }
 
     pub fn toggle_solo(&mut self, index: usize) {

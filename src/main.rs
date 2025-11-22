@@ -93,7 +93,7 @@ impl App {
         }
         mix.strips.bus_strip.active = false;
 
-        mix.get_mut_strip(self.active_strip_index).active = true;
+        mix.strips.iter_mut().nth(self.active_strip_index).unwrap().active = true;
     }
 
     /// runs the application's main loop until the user quits
@@ -158,7 +158,7 @@ impl App {
 
         // Compose status text
         self.status_line.clear();
-        let active_strip = &self.ps.mixes[self.active_mix_index].get_strip(self.active_strip_index);
+        let active_strip = &self.ps.mixes[self.active_mix_index].strips.iter().nth(self.active_strip_index).unwrap();
         let name = if self.active_strip_index < self.ps.channel_names.len() {
             self.ps.channel_names[self.active_strip_index].as_str()
         } else {
@@ -306,7 +306,10 @@ impl App {
 
     fn execute_rename(&mut self) {
         match self.ps.mixes[self.active_mix_index]
-            .get_strip(self.active_strip_index)
+            .strips
+            .iter()
+            .nth(self.active_strip_index)
+            .unwrap()
             .kind
         {
             StripKind::Channel => {
@@ -345,7 +348,10 @@ impl App {
 
     fn init_rename_channel(&mut self) {
         match self.ps.mixes[self.active_mix_index]
-            .get_strip(self.active_strip_index)
+            .strips
+            .iter()
+            .nth(self.active_strip_index)
+            .unwrap()
             .kind
         {
             StripKind::Channel => {
@@ -460,7 +466,7 @@ impl App {
 
     fn increment_fader(&mut self, delta: f64) {
         let strip =
-            &mut self.ps.mixes[self.active_mix_index].get_mut_strip(self.active_strip_index);
+            &mut self.ps.mixes[self.active_mix_index].strips.iter_mut().nth(self.active_strip_index).unwrap();
         let current = strip.fader;
         strip.set_fader(current + delta);
         self.write_active_fader();
@@ -518,15 +524,26 @@ impl App {
 
     fn toggle_mute(&mut self) {
         match self.ps.mixes[self.active_mix_index]
-            .get_strip(self.active_strip_index)
+            .strips
+            .iter()
+            .nth(self.active_strip_index)
+            .unwrap()
             .kind
         {
             StripKind::Channel | StripKind::Bus => {
-                self.ps.mixes[self.active_mix_index]
-                    .get_mut_strip(self.active_strip_index)
-                    .mute = !self.ps.mixes[self.active_mix_index]
-                    .get_strip(self.active_strip_index)
+                let muted = self.ps.mixes[self.active_mix_index]
+                    .strips
+                    .iter()
+                    .nth(self.active_strip_index)
+                    .unwrap()
                     .mute;
+
+                self.ps.mixes[self.active_mix_index]
+                    .strips
+                    .iter_mut()
+                    .nth(self.active_strip_index)
+                    .unwrap()
+                    .mute = !muted;
 
                 self.write_active_fader();
             }
