@@ -85,12 +85,13 @@ impl App {
 
     fn set_active_strip(&mut self, strip_index: isize) {
         let mix = &mut self.ps.mixes[self.active_mix_index];
-        self.active_strip_index = strip_index.clamp(0, mix.channel_strips.len() as isize) as usize;
+        self.active_strip_index =
+            strip_index.clamp(0, mix.strips.channel_strips.len() as isize) as usize;
 
-        for s in &mut *mix.channel_strips {
+        for s in &mut *mix.strips.channel_strips {
             s.active = false;
         }
-        mix.bus_strip.active = false;
+        mix.strips.bus_strip.active = false;
 
         mix.get_mut_strip(self.active_strip_index).active = true;
     }
@@ -159,10 +160,10 @@ impl App {
         self.status_line.clear();
         let active_strip = &self.ps.mixes[self.active_mix_index].get_strip(self.active_strip_index);
         let name = if self.active_strip_index < self.ps.channel_names.len() {
-            self.ps.channel_name(self.active_strip_index)
+            self.ps.channel_names[self.active_strip_index].as_str()
         } else {
             &self.ps.mixes[self.active_mix_index].name
-        }; 
+        };
 
         self.status_line.push_str(&format!(
             "{} ({:>5.1} dB) balance: {}, solo: {}, mute: {}, mute_by_solo: {}, meter: {:>.3}, meter height: {}",
@@ -243,7 +244,8 @@ impl App {
         );
         frame.render_widget(
             Pan {
-                balance: self.ps.mixes[self.active_mix_index].channel_strips[0].balance as i64,
+                balance: self.ps.mixes[self.active_mix_index].strips.channel_strips[0].balance
+                    as i64,
             },
             pan_area,
         );
@@ -308,8 +310,7 @@ impl App {
             .kind
         {
             StripKind::Channel => {
-                self.ps.channel_names[self.active_strip_index] =
-                    self.input.value_and_reset();
+                self.ps.channel_names[self.active_strip_index] = self.input.value_and_reset();
             }
             StripKind::Bus | StripKind::Main => {
                 self.ps.mixes[self.active_mix_index].name = self.input.value_and_reset();
@@ -348,7 +349,7 @@ impl App {
             .kind
         {
             StripKind::Channel => {
-                self.input = Input::new(self.ps.channel_name(self.active_strip_index).to_string());
+                self.input = Input::new(self.ps.channel_names[self.active_strip_index].to_string());
             }
             StripKind::Bus | StripKind::Main => {
                 self.input = Input::new(self.ps.mixes[self.active_mix_index].name.to_string());
@@ -443,12 +444,12 @@ impl App {
 
     fn clear_clip_indicators(&mut self) {
         for mix in &mut self.ps.mixes {
-            for s in &mut mix.channel_strips {
+            for s in &mut mix.strips.channel_strips {
                 s.clip = false;
                 s.meter_max = (-f64::INFINITY, -f64::INFINITY);
             }
-            mix.bus_strip.clip = false;
-            mix.bus_strip.meter_max = (-f64::INFINITY, -f64::INFINITY);
+            mix.strips.bus_strip.clip = false;
+            mix.strips.bus_strip.meter_max = (-f64::INFINITY, -f64::INFINITY);
         }
     }
 
@@ -484,16 +485,16 @@ impl App {
     }
 
     fn increment_balance(&mut self, delta: f64) {
-        let strip =
-            &mut self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
+        let strip = &mut self.ps.mixes[self.active_mix_index].strips.channel_strips
+            [self.active_strip_index];
         strip.balance = (strip.balance + delta).clamp(-100.0, 100.0);
 
         self.write_active_fader();
     }
 
     fn center_balance(&mut self) {
-        let strip =
-            &mut self.ps.mixes[self.active_mix_index].channel_strips[self.active_strip_index];
+        let strip = &mut self.ps.mixes[self.active_mix_index].strips.channel_strips
+            [self.active_strip_index];
         strip.balance = 0.0;
 
         self.write_active_fader();
@@ -556,12 +557,13 @@ impl App {
 
     fn faders_barchart(&self, mix: &usb::Mix) -> BarChart<'_> {
         let mut bars: Vec<Bar> = mix
+            .strips
             .channel_strips
             .iter()
             .enumerate()
-            .map(|(i, strip)| self.fader_bar(strip, self.ps.channel_name(i)))
+            .map(|(i, strip)| self.fader_bar(strip, self.ps.channel_names[i].as_str()))
             .collect();
-        bars.push(self.fader_bar(&mix.bus_strip, &mix.name));
+        bars.push(self.fader_bar(&mix.strips.bus_strip, &mix.name));
         let title = self.ps.mixes[self.active_mix_index].name.as_str();
         let title = Line::from(title).centered().bold();
 
@@ -640,19 +642,20 @@ impl App {
 
     fn meters_barchart(&self, mix: &usb::Mix) -> BarChart<'_> {
         let mut bars: Vec<Bar> = mix
+            .strips
             .channel_strips
             .iter()
             .enumerate()
             .map(|(i, strip)| {
                 self.meter_bar(
                     strip,
-                    self.ps.channel_name(i),
+                    self.ps.channel_names[i].as_str(),
                     strip.meter.0,
                     strip.meter_max.0,
                 )
             })
             .collect();
-        let dest = &mix.bus_strip;
+        let dest = &mix.strips.bus_strip;
         bars.push(self.meter_bar(dest, &mix.name, dest.meter.0, dest.meter_max.0));
         bars.push(self.meter_bar(dest, &mix.name, dest.meter.1, dest.meter_max.1));
         let title = "Meters";

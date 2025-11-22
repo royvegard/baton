@@ -117,10 +117,6 @@ impl PreSonusStudio1824c {
         })
     }
 
-    pub fn channel_name(&self, index: usize) -> &str {
-        self.channel_names[index].as_str()
-    }
-
     pub fn set_1_2_line(&mut self, on: bool) {
         match self.command.set_button(Button::Line, on).send(&self.device) {
             Ok(_) => log::debug!("Set 1/2 line to {}", on),
@@ -184,60 +180,60 @@ impl PreSonusStudio1824c {
                     let mut channel_index = 0;
 
                     for v in mic {
-                        m.channel_strips[channel_index].meter.0 = v;
-                        if m.channel_strips[channel_index].meter.0 > -0.001 {
-                            m.channel_strips[channel_index].clip = true;
+                        m.strips.channel_strips[channel_index].meter.0 = v;
+                        if m.strips.channel_strips[channel_index].meter.0 > -0.001 {
+                            m.strips.channel_strips[channel_index].clip = true;
                         }
-                        if v > m.channel_strips[channel_index].meter_max.0 {
-                            m.channel_strips[channel_index].meter_max.0 = v;
+                        if v > m.strips.channel_strips[channel_index].meter_max.0 {
+                            m.strips.channel_strips[channel_index].meter_max.0 = v;
                         }
                         channel_index += 1;
                     }
                     for v in spdif {
-                        m.channel_strips[channel_index].meter.0 = v;
-                        if m.channel_strips[channel_index].meter.0 > -0.001 {
-                            m.channel_strips[channel_index].clip = true;
+                        m.strips.channel_strips[channel_index].meter.0 = v;
+                        if m.strips.channel_strips[channel_index].meter.0 > -0.001 {
+                            m.strips.channel_strips[channel_index].clip = true;
                         }
-                        if v > m.channel_strips[channel_index].meter_max.0 {
-                            m.channel_strips[channel_index].meter_max.0 = v;
+                        if v > m.strips.channel_strips[channel_index].meter_max.0 {
+                            m.strips.channel_strips[channel_index].meter_max.0 = v;
                         }
                         channel_index += 1;
                     }
                     for v in adat {
-                        m.channel_strips[channel_index].meter.0 = v;
-                        if m.channel_strips[channel_index].meter.0 > -0.001 {
-                            m.channel_strips[channel_index].clip = true;
+                        m.strips.channel_strips[channel_index].meter.0 = v;
+                        if m.strips.channel_strips[channel_index].meter.0 > -0.001 {
+                            m.strips.channel_strips[channel_index].clip = true;
                         }
-                        if v > m.channel_strips[channel_index].meter_max.0 {
-                            m.channel_strips[channel_index].meter_max.0 = v;
+                        if v > m.strips.channel_strips[channel_index].meter_max.0 {
+                            m.strips.channel_strips[channel_index].meter_max.0 = v;
                         }
                         channel_index += 1;
                     }
                     for v in daw {
-                        m.channel_strips[channel_index].meter.0 = v;
-                        if m.channel_strips[channel_index].meter.0 > -0.001 {
-                            m.channel_strips[channel_index].clip = true;
+                        m.strips.channel_strips[channel_index].meter.0 = v;
+                        if m.strips.channel_strips[channel_index].meter.0 > -0.001 {
+                            m.strips.channel_strips[channel_index].clip = true;
                         }
-                        if v > m.channel_strips[channel_index].meter_max.0 {
-                            m.channel_strips[channel_index].meter_max.0 = v;
+                        if v > m.strips.channel_strips[channel_index].meter_max.0 {
+                            m.strips.channel_strips[channel_index].meter_max.0 = v;
                         }
                         channel_index += 1;
                     }
 
-                    m.bus_strip.meter.0 = bus[bus_index];
-                    if m.bus_strip.meter.0 > -0.001 {
-                        m.bus_strip.clip = true;
+                    m.strips.bus_strip.meter.0 = bus[bus_index];
+                    if m.strips.bus_strip.meter.0 > -0.001 {
+                        m.strips.bus_strip.clip = true;
                     }
-                    if m.bus_strip.meter.0 > m.bus_strip.meter_max.0 {
-                        m.bus_strip.meter_max.0 = m.bus_strip.meter.0;
+                    if m.strips.bus_strip.meter.0 > m.strips.bus_strip.meter_max.0 {
+                        m.strips.bus_strip.meter_max.0 = m.strips.bus_strip.meter.0;
                     }
                     bus_index += 1;
-                    m.bus_strip.meter.1 = bus[bus_index];
-                    if m.bus_strip.meter.1 > -0.001 {
-                        m.bus_strip.clip = true;
+                    m.strips.bus_strip.meter.1 = bus[bus_index];
+                    if m.strips.bus_strip.meter.1 > -0.001 {
+                        m.strips.bus_strip.clip = true;
                     }
-                    if m.bus_strip.meter.1 > m.bus_strip.meter_max.1 {
-                        m.bus_strip.meter_max.1 = m.bus_strip.meter.1;
+                    if m.strips.bus_strip.meter.1 > m.strips.bus_strip.meter_max.1 {
+                        m.strips.bus_strip.meter_max.1 = m.strips.bus_strip.meter.1;
                     }
                     bus_index += 1;
                 }
@@ -258,25 +254,25 @@ impl PreSonusStudio1824c {
 
         let mix_state = ps_state.mixes;
         for i in 0..self.mixes.len() {
-            for j in 0..self.mixes[i].channel_strips.len() {
-                self.mixes[i].channel_strips[j].fader = mix_state[i].channel_strips[j].fader;
-                self.mixes[i].channel_strips[j].balance = mix_state[i].channel_strips[j].balance;
-                self.mixes[i].channel_strips[j].solo = mix_state[i].channel_strips[j].solo;
-                self.mixes[i].channel_strips[j].mute = mix_state[i].channel_strips[j].mute;
-                self.mixes[i].channel_strips[j].mute_by_solo =
-                    mix_state[i].channel_strips[j].mute_by_solo;
+            for j in 0..self.mixes[i].strips.channel_strips.len() {
+                self.mixes[i].strips.channel_strips[j].fader = mix_state[i].strips.channel_strips[j].fader;
+                self.mixes[i].strips.channel_strips[j].balance = mix_state[i].strips.channel_strips[j].balance;
+                self.mixes[i].strips.channel_strips[j].solo = mix_state[i].strips.channel_strips[j].solo;
+                self.mixes[i].strips.channel_strips[j].mute = mix_state[i].strips.channel_strips[j].mute;
+                self.mixes[i].strips.channel_strips[j].mute_by_solo =
+                    mix_state[i].strips.channel_strips[j].mute_by_solo;
             }
 
             self.mixes[i].name = mix_state[i].name.clone();
-            self.mixes[i].bus_strip.fader = mix_state[i].bus_strip.fader;
-            self.mixes[i].bus_strip.mute = mix_state[i].bus_strip.mute;
+            self.mixes[i].strips.bus_strip.fader = mix_state[i].strips.bus_strip.fader;
+            self.mixes[i].strips.bus_strip.mute = mix_state[i].strips.bus_strip.mute;
         }
     }
 
     pub fn write_state(&mut self) {
         for i in 0..self.mixes.len() {
             let mut bus_index = 0;
-            for j in 0..self.mixes[i].channel_strips.len() {
+            for j in 0..self.mixes[i].strips.channel_strips.len() {
                 self.write_channel_fader(i, j);
                 bus_index = j;
             }
@@ -299,13 +295,13 @@ impl PreSonusStudio1824c {
                 }
                 match self
                     .command
-                    .set_output_fader(self.mixes[mix_index].bus_strip.number, value)
+                    .set_output_fader(self.mixes[mix_index].strips.bus_strip.number, value)
                     .send(&self.device)
                 {
                     Ok(_) => {
                         log::debug!(
                             "Set output fader mix {} to {} dB",
-                            self.mixes[mix_index].bus_strip.number,
+                            self.mixes[mix_index].strips.bus_strip.number,
                             fader
                         );
                     }
@@ -321,7 +317,7 @@ impl PreSonusStudio1824c {
                     .command
                     .set_input_fader(
                         channel_index as u32,
-                        self.mixes[mix_index].bus_strip.number,
+                        self.mixes[mix_index].strips.bus_strip.number,
                         Channel::Left,
                         value,
                     )
@@ -331,7 +327,7 @@ impl PreSonusStudio1824c {
                         log::debug!(
                             "Set input fader channel {} mix {} left to {} dB",
                             channel_index,
-                            self.mixes[mix_index].bus_strip.number,
+                            self.mixes[mix_index].strips.bus_strip.number,
                             left
                         );
                     }
@@ -346,7 +342,7 @@ impl PreSonusStudio1824c {
                     .command
                     .set_input_fader(
                         channel_index as u32,
-                        self.mixes[mix_index].bus_strip.number,
+                        self.mixes[mix_index].strips.bus_strip.number,
                         Channel::Right,
                         value,
                     )
@@ -356,7 +352,7 @@ impl PreSonusStudio1824c {
                         log::debug!(
                             "Set input fader channel {} mix {} right to {} dB",
                             channel_index,
-                            self.mixes[mix_index].bus_strip.number,
+                            self.mixes[mix_index].strips.bus_strip.number,
                             right
                         );
                     }
@@ -471,7 +467,7 @@ impl PreSonusStudio1824c {
     }
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Default, PartialEq)]
 pub enum StripKind {
     #[default]
     Channel,
@@ -546,6 +542,77 @@ impl Strip {
     }
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct MixStrips {
+    pub channel_strips: Vec<Strip>,
+    pub bus_strip: Strip,
+}
+
+pub struct MixStripsIterator<'a> {
+    channel_strips: &'a [Strip],
+    bus_strip: &'a Strip,
+    index: usize,
+}
+
+pub struct MixStripsMutIterator<'a> {
+    channel_strips: &'a mut [Strip],
+    bus_strip: Option<&'a mut Strip>,
+    index: usize,
+}
+
+impl<'a> Iterator for MixStripsIterator<'a> {
+    type Item = &'a Strip;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.channel_strips.len() {
+            let result = &self.channel_strips[self.index];
+            self.index += 1;
+            Some(result)
+        } else if self.index == self.channel_strips.len() {
+            self.index += 1;
+            Some(self.bus_strip)
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> Iterator for MixStripsMutIterator<'a> {
+    type Item = &'a mut Strip;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.channel_strips.len() {
+            let result = &mut self.channel_strips[self.index] as *mut Strip;
+            self.index += 1;
+            // SAFETY: We ensure each element is only returned once via index tracking
+            unsafe { Some(&mut *result) }
+        } else if self.index == self.channel_strips.len() {
+            self.index += 1;
+            self.bus_strip.take()
+        } else {
+            None
+        }
+    }
+}
+
+impl MixStrips {
+    pub fn iter(&self) -> MixStripsIterator<'_> {
+        MixStripsIterator {
+            channel_strips: &self.channel_strips,
+            bus_strip: &self.bus_strip,
+            index: 0,
+        }
+    }
+
+    pub fn iter_mut(&mut self) -> MixStripsMutIterator<'_> {
+        MixStripsMutIterator {
+            channel_strips: &mut self.channel_strips,
+            bus_strip: Some(&mut self.bus_strip),
+            index: 0,
+        }
+    }
+}
+
 /// A Mix contains several channel strips,
 /// and one destination or bus strip.
 /// The strips are channels
@@ -553,8 +620,7 @@ impl Strip {
 #[derive(Deserialize, Serialize)]
 pub struct Mix {
     pub name: String,
-    pub channel_strips: Vec<Strip>,
-    pub bus_strip: Strip,
+    pub strips: MixStrips,
 }
 
 impl Mix {
@@ -604,35 +670,27 @@ impl Mix {
 
         Mix {
             name: mix_name,
-            channel_strips,
-            bus_strip,
+            strips: MixStrips {
+                channel_strips,
+                bus_strip,
+            },
         }
     }
 
     pub fn get_strip(&self, index: usize) -> &Strip {
-        if index < self.channel_strips.len() {
-            &self.channel_strips[index]
-        } else {
-            &self.bus_strip
-        }
+        self.strips.iter().nth(index).unwrap()
     }
 
     pub fn get_mut_strip(&mut self, index: usize) -> &mut Strip {
-        if index < self.channel_strips.len() {
-            &mut self.channel_strips[index]
-        } else {
-            &mut self.bus_strip
-        }
+        self.strips.iter_mut().nth(index).unwrap()
     }
 
     pub fn toggle_solo(&mut self, index: usize) {
-        if let StripKind::Channel = self.get_strip(index).kind {
-            self.get_mut_strip(index).solo = !self.get_strip(index).solo;
-
-            let number_of_strips = self.channel_strips.len();
+        if self.strips.channel_strips[index].kind == StripKind::Channel {
+            self.strips.channel_strips[index].solo = !self.strips.channel_strips[index].solo;
 
             let mut solo_exists = false;
-            for s in self.channel_strips.iter().take(number_of_strips) {
+            for s in self.strips.channel_strips.iter() {
                 if s.solo {
                     solo_exists = true;
                     break;
@@ -640,12 +698,12 @@ impl Mix {
             }
 
             if solo_exists {
-                for i in 0..number_of_strips {
-                    self.get_mut_strip(i).mute_by_solo = true && !self.get_strip(i).solo;
+                for strip in self.strips.channel_strips.iter_mut() {
+                    strip.mute_by_solo = !strip.solo;
                 }
             } else {
-                for i in 0..number_of_strips {
-                    self.get_mut_strip(i).mute_by_solo = false;
+                for strip in self.strips.channel_strips.iter_mut() {
+                    strip.mute_by_solo = false;
                 }
             }
         }
