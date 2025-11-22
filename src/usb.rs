@@ -1,9 +1,17 @@
 use baton_studio::*;
+use pipewire::channel;
 use core::time::Duration;
 use nusb::{Device, MaybeFuture};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::num::NonZero;
+
+#[derive(Clone)]
+pub struct Meter {
+    pub value: f64,
+    pub max: f64,
+    pub clip: bool,
+}
 
 #[derive(Deserialize, Serialize)]
 #[serde(default)]
@@ -14,6 +22,10 @@ pub struct PreSonusStudio1824c {
     pub command: Command,
     #[serde(skip)]
     pub state: State,
+    #[serde(skip)]
+    pub channel_meters: Vec<Meter>,
+    #[serde(skip)]
+    pub bus_meters: Vec<Meter>,
     pub channel_names: Vec<String>,
     pub mixes: Vec<Mix>,
     #[serde(skip)]
@@ -109,6 +121,8 @@ impl PreSonusStudio1824c {
                 Mix::new(String::from("ADAT 7-8"), StripKind::Bus, 8, channel_name.len()),
             ],
             channel_names: channel_name,
+            channel_meters: vec![Meter { value: -96.0, max: -96.0, clip: false }; 36],
+            bus_meters: vec![Meter { value: -96.0, max: -96.0, clip: false }; 18],
             in_1_2_line: false,
             main_mute: false,
             main_mono: false,
@@ -153,87 +167,56 @@ impl PreSonusStudio1824c {
         match self.state.poll(&self.device) {
             Ok(_) => {
                 // synch meters
-                let mut mic = [0.0; 8];
-                let mut adat = [0.0; 8];
-                let mut spdif = [0.0; 2];
-                let mut daw = [0.0; 18];
-                let mut bus = [0.0; 18];
-
-                for (i, v) in mic.iter_mut().enumerate() {
-                    *v = gain_to_db(self.state.mic[i]);
+                let mut channel_index = 0;
+                for v in self.state.mic.iter().map(|g| gain_to_db(*g)) {
+                    self.channel_meters[channel_index].value = v;
+                    if v > self.channel_meters[channel_index].max {
+                        self.channel_meters[channel_index].max = v;
+                    }
+                    if self.channel_meters[channel_index].value > -0.001 {
+                        self.channel_meters[channel_index].clip = true;
+                    }
+                    channel_index += 1;
                 }
-                for (i, v) in adat.iter_mut().enumerate() {
-                    *v = gain_to_db(self.state.adat[i]);
+                for v in self.state.spdif.iter().map(|g| gain_to_db(*g)) {
+                    self.channel_meters[channel_index].value = v;
+                    if v > self.channel_meters[channel_index].max {
+                        self.channel_meters[channel_index].max = v;
+                    }
+                    if self.channel_meters[channel_index].value > -0.001 {
+                        self.channel_meters[channel_index].clip = true;
+                    }
+                    channel_index += 1;
                 }
-                for (i, v) in spdif.iter_mut().enumerate() {
-                    *v = gain_to_db(self.state.spdif[i]);
+                for v in self.state.adat.iter().map(|g| gain_to_db(*g)) {
+                    self.channel_meters[channel_index].value = v;
+                    if v > self.channel_meters[channel_index].max {
+                        self.channel_meters[channel_index].max = v;
+                    }
+                    if self.channel_meters[channel_index].value > -0.001 {
+                        self.channel_meters[channel_index].clip = true;
+                    }
+                    channel_index += 1;
                 }
-                for (i, v) in daw.iter_mut().enumerate() {
-                    *v = gain_to_db(self.state.daw[i]);
-                }
-                for (i, v) in bus.iter_mut().enumerate() {
-                    *v = gain_to_db(self.state.bus[i]);
+                for v in self.state.daw.iter().map(|g| gain_to_db(*g)) {
+                    self.channel_meters[channel_index].value = v;
+                    if v > self.channel_meters[channel_index].max {
+                        self.channel_meters[channel_index].max = v;
+                    }
+                    if self.channel_meters[channel_index].value > -0.001 {
+                        self.channel_meters[channel_index].clip = true;
+                    }
+                    channel_index += 1;
                 }
 
                 let mut bus_index = 0;
-                for m in &mut self.mixes.iter_mut() {
-                    let mut channel_index = 0;
-
-                    for v in mic {
-                        m.strips.channel_strips[channel_index].meter.0 = v;
-                        if m.strips.channel_strips[channel_index].meter.0 > -0.001 {
-                            m.strips.channel_strips[channel_index].clip = true;
-                        }
-                        if v > m.strips.channel_strips[channel_index].meter_max.0 {
-                            m.strips.channel_strips[channel_index].meter_max.0 = v;
-                        }
-                        channel_index += 1;
+                for v in self.state.bus.iter().map(|g| gain_to_db(*g)) {
+                    self.bus_meters[bus_index].value = v;
+                    if v > self.bus_meters[bus_index].max {
+                        self.bus_meters[bus_index].max = v;
                     }
-                    for v in spdif {
-                        m.strips.channel_strips[channel_index].meter.0 = v;
-                        if m.strips.channel_strips[channel_index].meter.0 > -0.001 {
-                            m.strips.channel_strips[channel_index].clip = true;
-                        }
-                        if v > m.strips.channel_strips[channel_index].meter_max.0 {
-                            m.strips.channel_strips[channel_index].meter_max.0 = v;
-                        }
-                        channel_index += 1;
-                    }
-                    for v in adat {
-                        m.strips.channel_strips[channel_index].meter.0 = v;
-                        if m.strips.channel_strips[channel_index].meter.0 > -0.001 {
-                            m.strips.channel_strips[channel_index].clip = true;
-                        }
-                        if v > m.strips.channel_strips[channel_index].meter_max.0 {
-                            m.strips.channel_strips[channel_index].meter_max.0 = v;
-                        }
-                        channel_index += 1;
-                    }
-                    for v in daw {
-                        m.strips.channel_strips[channel_index].meter.0 = v;
-                        if m.strips.channel_strips[channel_index].meter.0 > -0.001 {
-                            m.strips.channel_strips[channel_index].clip = true;
-                        }
-                        if v > m.strips.channel_strips[channel_index].meter_max.0 {
-                            m.strips.channel_strips[channel_index].meter_max.0 = v;
-                        }
-                        channel_index += 1;
-                    }
-
-                    m.strips.bus_strip.meter.0 = bus[bus_index];
-                    if m.strips.bus_strip.meter.0 > -0.001 {
-                        m.strips.bus_strip.clip = true;
-                    }
-                    if m.strips.bus_strip.meter.0 > m.strips.bus_strip.meter_max.0 {
-                        m.strips.bus_strip.meter_max.0 = m.strips.bus_strip.meter.0;
-                    }
-                    bus_index += 1;
-                    m.strips.bus_strip.meter.1 = bus[bus_index];
-                    if m.strips.bus_strip.meter.1 > -0.001 {
-                        m.strips.bus_strip.clip = true;
-                    }
-                    if m.strips.bus_strip.meter.1 > m.strips.bus_strip.meter_max.1 {
-                        m.strips.bus_strip.meter_max.1 = m.strips.bus_strip.meter.1;
+                    if self.bus_meters[bus_index].value > -0.001 {
+                        self.bus_meters[bus_index].clip = true;
                     }
                     bus_index += 1;
                 }
@@ -484,12 +467,6 @@ pub enum PanLaw {
 pub struct Strip {
     /// Volume fader in dB.
     pub fader: f64,
-    /// Left and right meter in dBFS.
-    /// Left only for mono strips.
-    #[serde(skip)]
-    pub meter: (f64, f64),
-    #[serde(skip)]
-    pub meter_max: (f64, f64),
     /// Left/right balance.
     /// 0 is center. -100 is left, 100 is right.
     pub balance: f64,
@@ -506,8 +483,6 @@ pub struct Strip {
     pub kind: StripKind,
     #[serde(skip)]
     pub number: u32,
-    #[serde(skip)]
-    pub clip: bool,
 }
 
 impl Strip {
@@ -636,8 +611,6 @@ impl Mix {
             let strip = Strip {
                 active: false,
                 fader: 0.0,
-                meter: (-f64::INFINITY, -f64::INFINITY),
-                meter_max: (-f64::INFINITY, -f64::INFINITY),
                 solo: false,
                 mute: false,
                 mute_by_solo: false,
@@ -646,7 +619,6 @@ impl Mix {
                 balance: 0.0,
                 kind: StripKind::Channel,
                 number: i as u32,
-                clip: false,
             };
 
             channel_strips.push(strip);
@@ -655,8 +627,6 @@ impl Mix {
         let bus_strip = Strip {
             active: false,
             fader: 0.0,
-            meter: (-f64::INFINITY, -f64::INFINITY),
-            meter_max: (-f64::INFINITY, -f64::INFINITY),
             solo: false,
             mute: false,
             mute_by_solo: false,
@@ -665,7 +635,6 @@ impl Mix {
             balance: 0.0,
             kind: mix_kind,
             number: mix_number,
-            clip: false,
         };
 
         Mix {
@@ -678,7 +647,7 @@ impl Mix {
     }
 
     pub fn toggle_solo(&mut self, index: usize) {
-        if self.strips.channel_strips[index].kind == StripKind::Channel {
+        if self.strips.iter().nth(index).unwrap().kind == StripKind::Channel {
             self.strips.channel_strips[index].solo = !self.strips.channel_strips[index].solo;
 
             let mut solo_exists = false;

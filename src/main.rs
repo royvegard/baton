@@ -173,7 +173,7 @@ impl App {
             active_strip.solo,
             active_strip.mute,
             active_strip.mute_by_solo,
-            active_strip.meter.0,
+            self.ps.channel_meters[self.active_strip_index].value,
             self.meter_heigth,
         ));
         let status_line = Line::from(self.status_line.as_str()).left_aligned();
@@ -449,13 +449,13 @@ impl App {
     }
 
     fn clear_clip_indicators(&mut self) {
-        for mix in &mut self.ps.mixes {
-            for s in &mut mix.strips.channel_strips {
-                s.clip = false;
-                s.meter_max = (-f64::INFINITY, -f64::INFINITY);
-            }
-            mix.strips.bus_strip.clip = false;
-            mix.strips.bus_strip.meter_max = (-f64::INFINITY, -f64::INFINITY);
+        for meter in &mut self.ps.channel_meters {
+            meter.clip = false;
+            meter.max = -f64::INFINITY;
+        }
+        for meter in &mut self.ps.bus_meters {
+            meter.clip = false;
+            meter.max = -f64::INFINITY;
         }
     }
 
@@ -658,23 +658,18 @@ impl App {
     // }
 
     fn meters_barchart(&self, mix: &usb::Mix) -> BarChart<'_> {
-        let mut bars: Vec<Bar> = mix
-            .strips
-            .channel_strips
-            .iter()
-            .enumerate()
-            .map(|(i, strip)| {
-                self.meter_bar(
-                    strip,
-                    self.ps.channel_names[i].as_str(),
-                    strip.meter.0,
-                    strip.meter_max.0,
-                )
-            })
-            .collect();
-        let dest = &mix.strips.bus_strip;
-        bars.push(self.meter_bar(dest, &mix.name, dest.meter.0, dest.meter_max.0));
-        bars.push(self.meter_bar(dest, &mix.name, dest.meter.1, dest.meter_max.1));
+        let mut bars: Vec<Bar> = self.ps.channel_meters.iter().enumerate().map(|(i, meter)| {
+            self.meter_bar(
+                meter.clip,
+                self.ps.channel_names[i].as_str(),
+                meter.value,
+                meter.max,
+            )
+        }).collect();
+        let bus_meter_left = &self.ps.bus_meters[self.active_mix_index * 2];
+        let bus_meter_right = &self.ps.bus_meters[self.active_mix_index * 2 + 1];
+        bars.push(self.meter_bar(bus_meter_left.clip, &mix.name, bus_meter_left.value, bus_meter_left.max));
+        bars.push(self.meter_bar(bus_meter_right.clip, &mix.name, bus_meter_right.value, bus_meter_right.max));
         let title = "Meters";
         let title = Line::from(title).centered().bold();
 
@@ -687,7 +682,7 @@ impl App {
 
     fn meter_bar(
         &self,
-        strip: &usb::Strip,
+        clip: bool,
         name: &str,
         meter_value: f64,
         meter_max_value: f64,
@@ -705,7 +700,7 @@ impl App {
         let strip_bg_color = Color::DarkGray;
         let label_bg_color = Color::Reset;
 
-        if strip.clip {
+        if clip {
             label_fg_color = Color::Red;
         }
         if meter_value > -18.0 {
