@@ -158,11 +158,16 @@ impl App {
 
         // Compose status text
         self.status_line.clear();
-        let active_strip = &self.ps.mixes[self.active_mix_index].strips.iter().nth(self.active_strip_index).unwrap();
+        let active_strip = self.ps.mixes[self.active_mix_index].strips.iter().nth(self.active_strip_index).unwrap();
         let name = if self.active_strip_index < self.ps.channel_names.len() {
             self.ps.channel_names[self.active_strip_index].as_str()
         } else {
             &self.ps.mixes[self.active_mix_index].name
+        };
+        let meter_value = if self.active_strip_index < self.ps.channel_meters.len() {
+            self.ps.channel_meters[self.active_strip_index].value
+        } else {
+            self.ps.bus_meters[self.active_mix_index * 2].value
         };
 
         self.status_line.push_str(&format!(
@@ -173,7 +178,7 @@ impl App {
             active_strip.solo,
             active_strip.mute,
             active_strip.mute_by_solo,
-            self.ps.channel_meters[self.active_strip_index].value,
+            meter_value,
             self.meter_heigth,
         ));
         let status_line = Line::from(self.status_line.as_str()).left_aligned();
