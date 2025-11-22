@@ -43,7 +43,8 @@ fn main() -> io::Result<()> {
 enum InputMode {
     #[default]
     Normal,
-    Editing,
+    Rename,
+    Command,
 }
 
 pub struct App {
@@ -246,21 +247,20 @@ impl App {
             strips_area,
         );
 
-        if self.input_mode == InputMode::Editing {
+        if self.input_mode == InputMode::Rename || self.input_mode == InputMode::Command {
+            let title = format!("{:?}", self.input_mode);
             let width = status_area.width.max(3) - 3;
             let style = Style::default();
             let scroll = self.input.visual_scroll(width as usize);
             let input = Paragraph::new(self.input.value())
                 .style(style)
                 .scroll((0, scroll as u16))
-                .block(Block::bordered().title("Rename"));
+                .block(Block::bordered().title(title));
             frame.render_widget(input, status_area);
-            if self.input_mode == InputMode::Editing {
-                // Ratatui hides the cursor unless it's explicitly set. Position the  cursor past the
-                // end of the input text and one line down from the border to the input line
-                let x = self.input.visual_cursor().max(scroll) - scroll + 1;
-                frame.set_cursor_position((status_area.x + x as u16, status_area.y + 1))
-            }
+            // Ratatui hides the cursor unless it's explicitly set. Position the  cursor past the
+            // end of the input text and one line down from the border to the input line
+            let x = self.input.visual_cursor().max(scroll) - scroll + 1;
+            frame.set_cursor_position((status_area.x + x as u16, status_area.y + 1))
         } else {
             frame.render_widget(
                 Paragraph::new(status_line).block(Block::bordered().title("Status")),
@@ -275,7 +275,7 @@ impl App {
             Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                 match self.input_mode {
                     InputMode::Normal => self.handle_key_event(key_event),
-                    InputMode::Editing => match key_event.code {
+                    InputMode::Rename | InputMode::Command => match key_event.code {
                         KeyCode::Enter => self.push_message(),
                         KeyCode::Esc => self.stop_editing(),
                         _ => {
@@ -290,6 +290,14 @@ impl App {
     }
 
     fn push_message(&mut self) {
+        match self.input_mode {
+            InputMode::Rename => self.execute_rename(),
+            InputMode::Command => self.execute_command(),
+            _ => todo!(),
+        }
+    }
+
+    fn execute_rename(&mut self) {
         match self.ps.mixes[self.active_mix_index]
             .get_strip(self.active_strip_index)
             .kind
@@ -306,11 +314,30 @@ impl App {
         self.input_mode = InputMode::Normal;
     }
 
+    fn execute_command(&mut self) {
+        let command = self.input.value_and_reset();
+        match command.as_str() {
+            ":mute" => self.toggle_mute(),
+            ":solo" => self.toggle_solo(),
+            _ => (),
+        }
+
+        self.input_mode = InputMode::Normal;
+    }
+
     fn stop_editing(&mut self) {
         self.input_mode = InputMode::Normal;
     }
 
-    fn start_editing(&mut self) {
+    fn start_editing(&mut self, mode: InputMode) {
+        match mode {
+            InputMode::Rename => self.init_rename_channel(),
+            InputMode::Command => self.init_input_command(),
+            _ => todo!(),
+        }
+    }
+
+    fn init_rename_channel(&mut self) {
         match self.ps.mixes[self.active_mix_index]
             .get_strip(self.active_strip_index)
             .kind
@@ -327,7 +354,12 @@ impl App {
                 );
             }
         }
-        self.input_mode = InputMode::Editing;
+        self.input_mode = InputMode::Rename;
+    }
+
+    fn init_input_command(&mut self) {
+        self.input = Input::new(String::from(':'));
+        self.input_mode = InputMode::Command;
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
@@ -350,7 +382,8 @@ impl App {
             KeyCode::Char('s') => self.toggle_solo(),
             KeyCode::Char('b') => self.toggle_bypass(),
             KeyCode::Char(' ') => self.clear_clip_indicators(),
-            KeyCode::Char('r') => self.start_editing(),
+            KeyCode::Char('r') => self.start_editing(InputMode::Rename),
+            KeyCode::Char(':') => self.start_editing(InputMode::Command),
             KeyCode::PageDown => self.increment_meter_heigth(1),
             KeyCode::PageUp => self.increment_meter_heigth(-1),
             KeyCode::Char('x') => {
@@ -412,8 +445,10 @@ impl App {
         for mix in &mut self.ps.mixes {
             for s in &mut mix.channel_strips {
                 s.clip = false;
+                s.meter_max = (-f64::INFINITY, -f64::INFINITY);
             }
             mix.bus_strip.clip = false;
+            mix.bus_strip.meter_max = (-f64::INFINITY, -f64::INFINITY);
         }
     }
 
@@ -608,11 +643,18 @@ impl App {
             .channel_strips
             .iter()
             .enumerate()
-            .map(|(i, strip)| self.meter_bar(strip, self.ps.channel_name(i), strip.meter.0))
+            .map(|(i, strip)| {
+                self.meter_bar(
+                    strip,
+                    self.ps.channel_name(i),
+                    strip.meter.0,
+                    strip.meter_max.0,
+                )
+            })
             .collect();
         let dest = &mix.bus_strip;
-        bars.push(self.meter_bar(dest, &mix.bus_strip.name, dest.meter.0));
-        bars.push(self.meter_bar(dest, &mix.bus_strip.name, dest.meter.1));
+        bars.push(self.meter_bar(dest, &mix.bus_strip.name, dest.meter.0, dest.meter_max.0));
+        bars.push(self.meter_bar(dest, &mix.bus_strip.name, dest.meter.1, dest.meter_max.1));
         let title = "Meters";
         let title = Line::from(title).centered().bold();
 
@@ -623,7 +665,13 @@ impl App {
             .max(500)
     }
 
-    fn meter_bar(&self, strip: &usb::Strip, name: &str, meter_value: f64) -> Bar<'_> {
+    fn meter_bar(
+        &self,
+        strip: &usb::Strip,
+        name: &str,
+        meter_value: f64,
+        meter_max_value: f64,
+    ) -> Bar<'_> {
         let a = -50.0;
         let b = 0.0;
         let c = 0.0;
@@ -662,7 +710,7 @@ impl App {
                     .fg(label_fg_color)
                     .bg(label_bg_color),
             )
-            .text_value(format!("{0:>5.1}", meter_value))
+            .text_value(format!("{0:>5.1}", meter_max_value))
             .style(style)
     }
 }

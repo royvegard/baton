@@ -170,12 +170,18 @@ impl PreSonusStudio1824c {
                         if m.channel_strips[channel_index].meter.0 > -0.001 {
                             m.channel_strips[channel_index].clip = true;
                         }
+                        if v > m.channel_strips[channel_index].meter_max.0 {
+                            m.channel_strips[channel_index].meter_max.0 = v;
+                        }
                         channel_index += 1;
                     }
                     for v in spdif {
                         m.channel_strips[channel_index].meter.0 = v;
                         if m.channel_strips[channel_index].meter.0 > -0.001 {
                             m.channel_strips[channel_index].clip = true;
+                        }
+                        if v > m.channel_strips[channel_index].meter_max.0 {
+                            m.channel_strips[channel_index].meter_max.0 = v;
                         }
                         channel_index += 1;
                     }
@@ -184,12 +190,18 @@ impl PreSonusStudio1824c {
                         if m.channel_strips[channel_index].meter.0 > -0.001 {
                             m.channel_strips[channel_index].clip = true;
                         }
+                        if v > m.channel_strips[channel_index].meter_max.0 {
+                            m.channel_strips[channel_index].meter_max.0 = v;
+                        }
                         channel_index += 1;
                     }
                     for v in daw {
                         m.channel_strips[channel_index].meter.0 = v;
                         if m.channel_strips[channel_index].meter.0 > -0.001 {
                             m.channel_strips[channel_index].clip = true;
+                        }
+                        if v > m.channel_strips[channel_index].meter_max.0 {
+                            m.channel_strips[channel_index].meter_max.0 = v;
                         }
                         channel_index += 1;
                     }
@@ -198,10 +210,16 @@ impl PreSonusStudio1824c {
                     if m.bus_strip.meter.0 > -0.001 {
                         m.bus_strip.clip = true;
                     }
+                    if m.bus_strip.meter.0 > m.bus_strip.meter_max.0 {
+                        m.bus_strip.meter_max.0 = m.bus_strip.meter.0;
+                    }
                     bus_index += 1;
                     m.bus_strip.meter.1 = bus[bus_index];
-                    if m.bus_strip.meter.0 > -0.001 {
+                    if m.bus_strip.meter.1 > -0.001 {
                         m.bus_strip.clip = true;
+                    }
+                    if m.bus_strip.meter.1 > m.bus_strip.meter_max.1 {
+                        m.bus_strip.meter_max.1 = m.bus_strip.meter.1;
                     }
                     bus_index += 1;
                 }
@@ -457,6 +475,8 @@ pub struct Strip {
     /// Left only for mono strips.
     #[serde(skip)]
     pub meter: (f64, f64),
+    #[serde(skip)]
+    pub meter_max: (f64, f64),
     /// Left/right balance.
     /// 0 is center. -100 is left, 100 is right.
     pub balance: f64,
@@ -534,6 +554,7 @@ impl Mix {
                 active: false,
                 fader: 0.0,
                 meter: (-f64::INFINITY, -f64::INFINITY),
+                meter_max: (-f64::INFINITY, -f64::INFINITY),
                 solo: false,
                 mute: false,
                 mute_by_solo: false,
@@ -553,6 +574,7 @@ impl Mix {
             active: false,
             fader: 0.0,
             meter: (-f64::INFINITY, -f64::INFINITY),
+            meter_max: (-f64::INFINITY, -f64::INFINITY),
             solo: false,
             mute: false,
             mute_by_solo: false,
@@ -596,12 +618,13 @@ impl Mix {
             for s in self.channel_strips.iter().take(number_of_strips) {
                 if s.solo {
                     solo_exists = true;
+                    break;
                 }
             }
 
             if solo_exists {
                 for i in 0..number_of_strips {
-                    self.get_mut_strip(i).mute_by_solo = true;
+                    self.get_mut_strip(i).mute_by_solo = true && !self.get_strip(i).solo;
                 }
             } else {
                 for i in 0..number_of_strips {
