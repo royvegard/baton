@@ -109,19 +109,78 @@ impl PreSonusStudio1824c {
             command: Command::new(),
             state: State::new(),
             mixes: vec![
-                Mix::new(String::from("MAIN 1-2"), StripKind::Main, 0, channel_name.len()),
-                Mix::new(String::from("MIX 3-4"), StripKind::Bus, 1, channel_name.len()),
-                Mix::new(String::from("MIX 5-6"), StripKind::Bus, 2, channel_name.len()),
-                Mix::new(String::from("MIX 7-8"), StripKind::Bus, 3, channel_name.len()),
-                Mix::new(String::from("S/PDIF"), StripKind::Bus, 4, channel_name.len()),
-                Mix::new(String::from("ADAT 1-2"), StripKind::Bus, 5, channel_name.len()),
-                Mix::new(String::from("ADAT 3-4"), StripKind::Bus, 6, channel_name.len()),
-                Mix::new(String::from("ADAT 5-6"), StripKind::Bus, 7, channel_name.len()),
-                Mix::new(String::from("ADAT 7-8"), StripKind::Bus, 8, channel_name.len()),
+                Mix::new(
+                    String::from("MAIN 1-2"),
+                    StripKind::Main,
+                    0,
+                    channel_name.len(),
+                ),
+                Mix::new(
+                    String::from("MIX 3-4"),
+                    StripKind::Bus,
+                    1,
+                    channel_name.len(),
+                ),
+                Mix::new(
+                    String::from("MIX 5-6"),
+                    StripKind::Bus,
+                    2,
+                    channel_name.len(),
+                ),
+                Mix::new(
+                    String::from("MIX 7-8"),
+                    StripKind::Bus,
+                    3,
+                    channel_name.len(),
+                ),
+                Mix::new(
+                    String::from("S/PDIF"),
+                    StripKind::Bus,
+                    4,
+                    channel_name.len(),
+                ),
+                Mix::new(
+                    String::from("ADAT 1-2"),
+                    StripKind::Bus,
+                    5,
+                    channel_name.len(),
+                ),
+                Mix::new(
+                    String::from("ADAT 3-4"),
+                    StripKind::Bus,
+                    6,
+                    channel_name.len(),
+                ),
+                Mix::new(
+                    String::from("ADAT 5-6"),
+                    StripKind::Bus,
+                    7,
+                    channel_name.len(),
+                ),
+                Mix::new(
+                    String::from("ADAT 7-8"),
+                    StripKind::Bus,
+                    8,
+                    channel_name.len(),
+                ),
             ],
             channel_names: channel_name,
-            channel_meters: vec![Meter { value: -96.0, max: -96.0, clip: false }; 36],
-            bus_meters: vec![Meter { value: -96.0, max: -96.0, clip: false }; 18],
+            channel_meters: vec![
+                Meter {
+                    value: -96.0,
+                    max: -96.0,
+                    clip: false
+                };
+                36
+            ],
+            bus_meters: vec![
+                Meter {
+                    value: -96.0,
+                    max: -96.0,
+                    clip: false
+                };
+                18
+            ],
             in_1_2_line: false,
             main_mute: false,
             main_mono: false,
@@ -237,10 +296,14 @@ impl PreSonusStudio1824c {
         let mix_state = ps_state.mixes;
         for i in 0..self.mixes.len() {
             for j in 0..self.mixes[i].strips.channel_strips.len() {
-                self.mixes[i].strips.channel_strips[j].fader = mix_state[i].strips.channel_strips[j].fader;
-                self.mixes[i].strips.channel_strips[j].balance = mix_state[i].strips.channel_strips[j].balance;
-                self.mixes[i].strips.channel_strips[j].solo = mix_state[i].strips.channel_strips[j].solo;
-                self.mixes[i].strips.channel_strips[j].mute = mix_state[i].strips.channel_strips[j].mute;
+                self.mixes[i].strips.channel_strips[j].fader =
+                    mix_state[i].strips.channel_strips[j].fader;
+                self.mixes[i].strips.channel_strips[j].balance =
+                    mix_state[i].strips.channel_strips[j].balance;
+                self.mixes[i].strips.channel_strips[j].solo =
+                    mix_state[i].strips.channel_strips[j].solo;
+                self.mixes[i].strips.channel_strips[j].mute =
+                    mix_state[i].strips.channel_strips[j].mute;
                 self.mixes[i].strips.channel_strips[j].mute_by_solo =
                     mix_state[i].strips.channel_strips[j].mute_by_solo;
             }
@@ -263,7 +326,11 @@ impl PreSonusStudio1824c {
     }
 
     pub fn write_channel_fader(&mut self, mix_index: usize, channel_index: usize) {
-        let strip = self.mixes[mix_index].strips.iter().nth(channel_index).unwrap();
+        let strip = self.mixes[mix_index]
+            .strips
+            .iter()
+            .nth(channel_index)
+            .unwrap();
         let muted = strip.mute | strip.mute_by_solo;
         let soloed = strip.solo;
 

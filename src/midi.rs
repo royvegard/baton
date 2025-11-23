@@ -1,5 +1,5 @@
-use alsa::seq::{EventType, EvCtrl, PortCap, PortType};
-use alsa::{seq, Direction};
+use alsa::seq::{EvCtrl, EventType, PortCap, PortType};
+use alsa::{Direction, seq};
 use std::ffi::CString;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -51,8 +51,16 @@ fn run_midi_loop(sender: Sender<MidiMessage>) -> Result<(), Box<dyn std::error::
     )?;
 
     let client_id = seq.client_id()?;
-    log::info!("Created ALSA MIDI port: {}:{} (Baton:baton-midi-in)", client_id, port);
-    log::info!("Connect MIDI devices using: aconnect <source-port> {}:{}", client_id, port);
+    log::info!(
+        "Created ALSA MIDI port: {}:{} (Baton:baton-midi-in)",
+        client_id,
+        port
+    );
+    log::info!(
+        "Connect MIDI devices using: aconnect <source-port> {}:{}",
+        client_id,
+        port
+    );
     log::info!("Or use: aconnect <source-port> Baton:baton-midi-in");
 
     // Set up input for receiving events
@@ -63,7 +71,7 @@ fn run_midi_loop(sender: Sender<MidiMessage>) -> Result<(), Box<dyn std::error::
     loop {
         if let Ok(event) = input.event_input() {
             let event_type = event.get_type();
-            
+
             match event_type {
                 EventType::Controller => {
                     // Control Change - use EvCtrl to extract structured data
@@ -73,8 +81,12 @@ fn run_midi_loop(sender: Sender<MidiMessage>) -> Result<(), Box<dyn std::error::
                             controller: ctrl_data.param as u8,
                             value: ctrl_data.value as u8,
                         });
-                        log::debug!("MIDI CC: ch={}, cc={}, val={}", 
-                            ctrl_data.channel, ctrl_data.param, ctrl_data.value);
+                        log::debug!(
+                            "MIDI CC: ch={}, cc={}, val={}",
+                            ctrl_data.channel,
+                            ctrl_data.param,
+                            ctrl_data.value
+                        );
                     }
                 }
                 _ => {}
