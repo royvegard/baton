@@ -1,5 +1,4 @@
 use baton_studio::*;
-use pipewire::channel;
 use core::time::Duration;
 use nusb::{Device, MaybeFuture};
 use serde::{Deserialize, Serialize};

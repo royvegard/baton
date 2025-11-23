@@ -19,6 +19,7 @@ use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 use usb::StripKind;
 
+mod midi;
 mod pan;
 mod usb;
 
@@ -56,14 +57,27 @@ pub struct App {
     meter_heigth: u16,
     status_line: String,
     ps: usb::PreSonusStudio1824c,
+    tick_rate: Duration,
     last_tick: Instant,
     bypass: bool,
     input: Input,
     input_mode: InputMode,
+    midi_input: Option<midi::MidiInput>,
 }
 
 impl App {
     fn new() -> Self {
+        let midi_input = match midi::MidiInput::new() {
+            Ok(m) => {
+                log::info!("MIDI input initialized");
+                Some(m)
+            }
+            Err(e) => {
+                log::warn!("Failed to initialize MIDI input: {}", e);
+                None
+            }
+        };
+
         let mut app = App {
             exit: false,
             active_mix_index: 0,
@@ -74,9 +88,11 @@ impl App {
             status_line: String::with_capacity(256),
             ps: usb::PreSonusStudio1824c::new().expect("Failed to open device"),
             last_tick: Instant::now(),
+            tick_rate: Duration::from_millis(100),
             bypass: false,
             input: Input::default(),
             input_mode: InputMode::Normal,
+            midi_input,
         };
 
         app.set_active_strip(app.active_strip_index as isize);
@@ -98,9 +114,6 @@ impl App {
 
     /// runs the application's main loop until the user quits
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
-        let tick_rate = Duration::from_millis(100);
-        self.last_tick = Instant::now();
-
         // Load config
         let config_file = match env::var("HOME") {
             Ok(h) => format!("{h}/.baton.json"),
@@ -121,12 +134,12 @@ impl App {
 
         while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
-            let timeout = tick_rate.saturating_sub(self.last_tick.elapsed());
+            let timeout = self.tick_rate.saturating_sub(self.last_tick.elapsed());
             if event::poll(timeout)? {
                 self.handle_events()?;
             }
 
-            if self.last_tick.elapsed() >= tick_rate {
+            if self.last_tick.elapsed() >= self.tick_rate {
                 self.on_tick();
                 self.last_tick = Instant::now();
             }
@@ -143,6 +156,76 @@ impl App {
 
     fn on_tick(&mut self) {
         self.ps.poll_state();
+        self.process_midi_messages();
+    }
+
+    fn process_midi_messages(&mut self) {
+        let midi_input = match &self.midi_input {
+            Some(m) => m,
+            None => return,
+        };
+
+        let mut messages = Vec::new();
+        while let Some(msg) = midi_input.try_recv() {
+            messages.push(msg);
+        }
+
+        for msg in messages {
+            match msg {
+                midi::MidiMessage::ControlChange {
+                    channel,
+                    controller,
+                    value,
+                } => {
+                    log::debug!(
+                        "MIDI CC: channel={}, controller={}, value={}",
+                        channel,
+                        controller,
+                        value
+                    );
+                    self.handle_midi_control_change(controller, value);
+                }
+            }
+        }
+    }
+
+    fn handle_midi_control_change(&mut self, controller: u8, value: u8) {
+        // Example MIDI mappings - customize these as needed:
+        let active_mix_index = self.active_mix_index;
+        let active_strip_index = self.active_strip_index;
+
+        match controller {
+            // CC 7: Main Volume
+            7 => {
+                let mix = &mut self.ps.mixes[active_mix_index];
+                let strip = mix.strips.iter_mut().nth(active_strip_index).unwrap();
+                // Map MIDI value (0-127) to fader range (-96 to +10 dB)
+                let fader_value = (value as f64 / 127.0) * 106.0 - 96.0;
+                strip.set_fader(fader_value);
+                self.status_line = format!("MIDI: Fader set to {:.1} dB", fader_value);
+            }
+            // CC 10: Pan/Balance
+            10 => {
+                let mix = &mut self.ps.mixes[active_mix_index];
+                let strip = mix.strips.iter_mut().nth(active_strip_index).unwrap();
+                // Map MIDI value (0-127) to balance range (-100 to +100)
+                strip.balance = (value as f64 / 127.0) * 200.0 - 100.0;
+                self.status_line = format!("MIDI: Balance set to {:.1}", strip.balance);
+            }
+            // CC 16-23: Select strip 0-7
+            16..=23 => {
+                let strip_index = (controller - 16) as isize;
+                self.set_active_strip(strip_index);
+                self.status_line = format!("MIDI: Selected strip {}", strip_index);
+            }
+            _ => {
+                // Log unknown controllers for user reference
+                log::debug!("Unhandled MIDI CC: {} = {}", controller, value);
+            }
+        }
+        
+        // Write the changes to the device after updating the values
+        self.ps.write_channel_fader(active_mix_index, active_strip_index);
     }
 
     fn draw(&mut self, frame: &mut Frame) {
