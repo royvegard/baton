@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 
 /// Identifies a specific control on a strip
@@ -19,10 +19,26 @@ pub struct StripTarget {
 }
 
 /// Identifies a MIDI control source
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MidiControl {
     pub channel: u8,  // 0-15
     pub cc: u8,       // 0-127
+}
+
+impl MidiControl {
+    /// Convert to string key for serialization: "chan XX: cc YYY"
+    pub fn to_key(&self) -> String {
+        format!("chan {:02}: cc {:03}", self.channel, self.cc)
+    }
+    
+    /// Parse from string key: "chan XX: cc YYY"
+    pub fn from_key(s: &str) -> Option<Self> {
+        let rest = s.strip_prefix("chan ")?;
+        let (ch_str, cc_part) = rest.split_once(": cc ")?;
+        let channel = ch_str.trim().parse().ok()?;
+        let cc = cc_part.trim().parse().ok()?;
+        Some(MidiControl { channel, cc })
+    }
 }
 
 /// Global device controls (not strip-specific)
@@ -44,15 +60,128 @@ pub enum ControlTarget {
 }
 
 /// Complete MIDI mapping configuration
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct MidiMapping {
     /// Map MIDI CC to strip/global controls
     pub mappings: HashMap<MidiControl, ControlTarget>,
     
     /// Optional: Value transformation
     /// Maps MIDI value range (0-127) to custom min/max
-    #[serde(skip_serializing_if = "HashMap::is_empty", default)]
     pub value_ranges: HashMap<MidiControl, ValueRange>,
+}
+
+// Custom serialization for MidiMapping
+impl Serialize for MidiMapping {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        use std::collections::BTreeMap;
+        
+        let mut state = serializer.serialize_struct("MidiMapping", 2)?;
+        
+        // Convert HashMap to BTreeMap for sorted output
+        // BTreeMap automatically sorts by key
+        let mappings_str: BTreeMap<String, &ControlTarget> = self
+            .mappings
+            .iter()
+            .map(|(k, v)| (k.to_key(), v))
+            .collect();
+        state.serialize_field("mappings", &mappings_str)?;
+        
+        let ranges_str: BTreeMap<String, &ValueRange> = self
+            .value_ranges
+            .iter()
+            .map(|(k, v)| (k.to_key(), v))
+            .collect();
+        state.serialize_field("value_ranges", &ranges_str)?;
+        
+        state.end()
+    }
+}
+
+// Custom deserialization for MidiMapping
+impl<'de> Deserialize<'de> for MidiMapping {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{self, MapAccess, Visitor};
+        use std::fmt;
+        
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "snake_case")]
+        enum Field {
+            Mappings,
+            ValueRanges,
+        }
+        
+        struct MidiMappingVisitor;
+        
+        impl<'de> Visitor<'de> for MidiMappingVisitor {
+            type Value = MidiMapping;
+            
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct MidiMapping")
+            }
+            
+            fn visit_map<V>(self, mut map: V) -> Result<MidiMapping, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut mappings: Option<HashMap<String, ControlTarget>> = None;
+                let mut value_ranges: Option<HashMap<String, ValueRange>> = None;
+                
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Mappings => {
+                            if mappings.is_some() {
+                                return Err(de::Error::duplicate_field("mappings"));
+                            }
+                            mappings = Some(map.next_value()?);
+                        }
+                        Field::ValueRanges => {
+                            if value_ranges.is_some() {
+                                return Err(de::Error::duplicate_field("value_ranges"));
+                            }
+                            value_ranges = Some(map.next_value()?);
+                        }
+                    }
+                }
+                
+                let mappings_str = mappings.unwrap_or_default();
+                let ranges_str = value_ranges.unwrap_or_default();
+                
+                // Convert HashMap<String, _> back to HashMap<MidiControl, _>
+                let mut mappings_map = HashMap::new();
+                for (key, value) in mappings_str {
+                    if let Some(midi_control) = MidiControl::from_key(&key) {
+                        mappings_map.insert(midi_control, value);
+                    } else {
+                        return Err(de::Error::custom(format!("Invalid MIDI control key: {}", key)));
+                    }
+                }
+                
+                let mut ranges_map = HashMap::new();
+                for (key, value) in ranges_str {
+                    if let Some(midi_control) = MidiControl::from_key(&key) {
+                        ranges_map.insert(midi_control, value);
+                    } else {
+                        return Err(de::Error::custom(format!("Invalid MIDI control key: {}", key)));
+                    }
+                }
+                
+                Ok(MidiMapping {
+                    mappings: mappings_map,
+                    value_ranges: ranges_map,
+                })
+            }
+        }
+        
+        const FIELDS: &[&str] = &["mappings", "value_ranges"];
+        deserializer.deserialize_struct("MidiMapping", FIELDS, MidiMappingVisitor)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
