@@ -19,7 +19,10 @@ use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 use usb::StripKind;
 
+use crate::midi_control::{ControlTarget, MidiControl, StripTarget, GlobalControl};
+
 mod midi;
+mod midi_control;
 mod pan;
 mod usb;
 
@@ -63,6 +66,7 @@ pub struct App {
     input: Input,
     input_mode: InputMode,
     midi_input: Option<midi::MidiInput>,
+    midi_mapping: midi_control::MidiMapping,
 }
 
 impl App {
@@ -93,6 +97,7 @@ impl App {
             input: Input::default(),
             input_mode: InputMode::Normal,
             midi_input,
+            midi_mapping: midi_control::MidiMapping::create_default(),
         };
 
         app.set_active_strip(app.active_strip_index as isize);
@@ -151,6 +156,12 @@ impl App {
         file.write_all(serialized.as_bytes()).unwrap();
         file.flush().unwrap();
 
+        // Save midi mapping
+        let serialized_mapping = serde_json::to_string_pretty(&self.midi_mapping).unwrap();
+        let mut mapping_file = File::create(format!("{}/.baton_midi_mapping.json", env::var("HOME").unwrap_or_else(|_| ".".to_string()))).unwrap();
+        mapping_file.write_all(serialized_mapping.as_bytes()).unwrap();
+        mapping_file.flush().unwrap();
+
         Ok(())
     }
 
@@ -183,49 +194,90 @@ impl App {
                         controller,
                         value
                     );
-                    self.handle_midi_control_change(controller, value);
+                    self.handle_midi_control_change(channel, controller, value);
                 }
             }
         }
     }
 
-    fn handle_midi_control_change(&mut self, controller: u8, value: u8) {
-        // Example MIDI mappings - customize these as needed:
-        let active_mix_index = self.active_mix_index;
-        let active_strip_index = self.active_strip_index;
+    fn handle_midi_control_change(&mut self, channel: u8, controller: u8, value: u8) {
+        let midi_control = MidiControl {
+            channel,
+            cc: controller,
+        };
 
-        match controller {
-            // CC 7: Main Volume
-            7 => {
-                let mix = &mut self.ps.mixes[active_mix_index];
-                let strip = mix.strips.iter_mut().nth(active_strip_index).unwrap();
-                // Map MIDI value (0-127) to fader range (-96 to +10 dB)
-                let fader_value = (value as f64 / 127.0) * 106.0 - 96.0;
-                strip.set_fader(fader_value);
-                self.status_line = format!("MIDI: Fader set to {:.1} dB", fader_value);
-            }
-            // CC 10: Pan/Balance
-            10 => {
-                let mix = &mut self.ps.mixes[active_mix_index];
-                let strip = mix.strips.iter_mut().nth(active_strip_index).unwrap();
-                // Map MIDI value (0-127) to balance range (-100 to +100)
-                strip.balance = (value as f64 / 127.0) * 200.0 - 100.0;
-                self.status_line = format!("MIDI: Balance set to {:.1}", strip.balance);
-            }
-            // CC 16-23: Select strip 0-7
-            16..=23 => {
-                let strip_index = (controller - 16) as isize;
-                self.set_active_strip(strip_index);
-                self.status_line = format!("MIDI: Selected strip {}", strip_index);
-            }
-            _ => {
-                // Log unknown controllers for user reference
-                log::debug!("Unhandled MIDI CC: {} = {}", controller, value);
+        // Clone the target to avoid holding a borrow of self.midi_mapping
+        if let Some(target) = self.midi_mapping.get_target(&midi_control).cloned() {
+            let transformed_value = self.midi_mapping.transform_value(&midi_control, value);
+
+            match target {
+                ControlTarget::Strip(strip_target) => {
+                    self.handle_strip_control(&strip_target, transformed_value);
+                }
+                ControlTarget::Global(global_control) => {
+                    self.handle_global_control(&global_control, value);
+                }
             }
         }
-        
-        // Write the changes to the device after updating the values
-        self.ps.write_channel_fader(active_mix_index, active_strip_index);
+    }
+
+    fn handle_global_control(&mut self, control: &GlobalControl, value: u8) {
+        match control {
+            GlobalControl::PhantomPower => {
+                if value > 63 {
+                    self.toggle_phantom_power();
+                }
+            }
+            GlobalControl::Line1_2 => {
+                if value > 63 {
+                    self.toggle_1_2_line();
+                }
+            }
+            GlobalControl::MainMute => {
+                if value > 63 {
+                    self.toggle_main_mute();
+                }
+            }
+            GlobalControl::MainMono => {
+                if value > 63 {
+                    self.toggle_main_mono();
+                }
+            }
+            GlobalControl::ActiveMixSelect => {
+                let mix_index = ((value as f64 / 127.0) * 8.0) as usize;
+                self.set_active_mix(mix_index.min(8));
+            }
+            GlobalControl::ActiveStripSelect => {
+                let strip_index = ((value as f64 / 127.0) * 10.0) as usize;
+                self.set_active_strip(strip_index as isize);
+            }
+        }
+    }
+
+    fn handle_strip_control(&mut self, target: &StripTarget, value: f64) {
+        let mix = &mut self.ps.mixes[target.mix_index];
+        let strip = mix.strips.iter_mut().nth(target.strip_index).unwrap();
+
+        match target.control {
+            midi_control::StripControl::Fader => {
+                strip.set_fader(value);
+                self.ps
+                    .write_channel_fader(target.mix_index, target.strip_index);
+            }
+            midi_control::StripControl::Balance => {
+                strip.balance = value.clamp(-100.0, 100.0);
+                self.ps
+                    .write_channel_fader(target.mix_index, target.strip_index);
+            }
+            midi_control::StripControl::Mute => {
+                strip.mute = value >= 63.0;
+                self.ps.write_state();
+            }
+            midi_control::StripControl::Solo => {
+                strip.solo = value >= 63.0;
+                self.ps.write_state();
+            }
+        }
     }
 
     fn draw(&mut self, frame: &mut Frame) {
