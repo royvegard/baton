@@ -157,6 +157,7 @@ impl App {
         file.flush().unwrap();
 
         // Save midi mapping
+        self.midi_mapping.sort_mappings();
         let serialized_mapping = serde_json::to_string_pretty(&self.midi_mapping).unwrap();
         let mut mapping_file = File::create(format!("{}/.baton_midi_mapping.json", env::var("HOME").unwrap_or_else(|_| ".".to_string()))).unwrap();
         mapping_file.write_all(serialized_mapping.as_bytes()).unwrap();

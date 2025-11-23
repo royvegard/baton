@@ -83,6 +83,20 @@ impl MidiMapping {
         Self::default()
     }
     
+    /// Sort mappings by MIDI channel and CC number
+    pub fn sort_mappings(&mut self) {
+        self.mappings.sort_by(|a, b| {
+            // First compare by channel
+            match a.midi.channel.cmp(&b.midi.channel) {
+                std::cmp::Ordering::Equal => {
+                    // If channels are equal, compare by CC number
+                    a.midi.cc.cmp(&b.midi.cc)
+                }
+                other => other,
+            }
+        });
+    }
+
     /// Add a mapping from MIDI CC to a strip control
     pub fn map_strip(&mut self, midi: MidiControl, target: StripTarget, value_range: Option<ValueRange>) {
         self.mappings.push(MidiMappingEntry {
@@ -91,7 +105,7 @@ impl MidiMapping {
             value_range,
         });
     }
-    
+
     /// Add a mapping from MIDI CC to a global control
     pub fn map_global(&mut self, midi: MidiControl, target: GlobalControl) {
         self.mappings.push(MidiMappingEntry {
