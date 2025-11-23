@@ -36,7 +36,7 @@ pub enum GlobalControl {
 }
 
 /// What a MIDI control maps to
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ControlTarget {
     Strip(StripTarget),
     Global(GlobalControl),
@@ -75,6 +75,17 @@ pub enum Curve {
     Linear,
     Exponential,
     Logarithmic,
+}
+
+/// MIDI learn state
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MidiLearnState {
+    /// Not learning
+    Inactive,
+    /// Learning for a specific target
+    Learning {
+        target: ControlTarget,
+    },
 }
 
 impl MidiMapping {
@@ -130,8 +141,8 @@ impl MidiMapping {
                 return range.transform(midi_value);
             }
         }
-        // Default: map 0-127 to 0.0-1.0
-        midi_value as f64 / 127.0
+        // Default: map 0-127
+        midi_value as f64
     }
     
     /// Create a default mapping for a standard control surface
@@ -184,6 +195,74 @@ impl MidiMapping {
         );
         
         mapping
+    }
+
+    /// Start learning mode for a specific target
+    /// Returns the current learn state
+    pub fn start_learning(&self, target: ControlTarget) -> MidiLearnState {
+        MidiLearnState::Learning { target }
+    }
+
+    /// Attempt to learn a MIDI mapping
+    /// If in learning mode, maps the MIDI control to the target
+    /// Returns true if learning was successful
+    pub fn learn_mapping(
+        &mut self,
+        learn_state: &MidiLearnState,
+        midi: MidiControl,
+        default_range: Option<ValueRange>,
+    ) -> bool {
+        match learn_state {
+            MidiLearnState::Learning { target } => {
+                // Remove any existing mapping for this MIDI control
+                self.mappings.retain(|entry| entry.midi != midi);
+                
+                // Add the new mapping
+                match target {
+                    ControlTarget::Strip(_) => {
+                        if let ControlTarget::Strip(strip_target) = target {
+                            self.map_strip(midi, *strip_target, default_range);
+                        }
+                    }
+                    ControlTarget::Global(_) => {
+                        if let ControlTarget::Global(global_control) = target {
+                            self.map_global(midi, *global_control);
+                        }
+                    }
+                }
+                
+                true
+            }
+            MidiLearnState::Inactive => false,
+        }
+    }
+
+    /// Remove a mapping for a specific MIDI control
+    pub fn remove_mapping(&mut self, midi: &MidiControl) -> bool {
+        let len_before = self.mappings.len();
+        self.mappings.retain(|entry| &entry.midi != midi);
+        self.mappings.len() < len_before
+    }
+
+    /// Get default value range for a control type
+    pub fn default_range_for_control(control: &StripControl) -> Option<ValueRange> {
+        match control {
+            StripControl::Fader => Some(ValueRange {
+                midi_min: 0,
+                midi_max: 127,
+                target_min: -96.0,
+                target_max: 10.0,
+                curve: Curve::Linear,
+            }),
+            StripControl::Balance => Some(ValueRange {
+                midi_min: 0,
+                midi_max: 127,
+                target_min: -100.0,
+                target_max: 100.0,
+                curve: Curve::Linear,
+            }),
+            StripControl::Mute | StripControl::Solo => None,
+        }
     }
 }
 

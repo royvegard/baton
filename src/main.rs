@@ -19,7 +19,7 @@ use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 use usb::StripKind;
 
-use crate::midi_control::{ControlTarget, MidiControl, StripTarget, GlobalControl};
+use crate::midi_control::{ControlTarget, GlobalControl, MidiControl, StripTarget};
 
 mod midi;
 mod midi_control;
@@ -67,6 +67,7 @@ pub struct App {
     input_mode: InputMode,
     midi_input: Option<midi::MidiInput>,
     midi_mapping: midi_control::MidiMapping,
+    midi_learn_state: midi_control::MidiLearnState,
 }
 
 impl App {
@@ -80,6 +81,21 @@ impl App {
                 log::warn!("Failed to initialize MIDI input: {}", e);
                 None
             }
+        };
+
+        // Load or create MIDI mapping
+        let midi_mapping_file = match env::var("HOME") {
+            Ok(h) => format!("{h}/.baton_midi_mapping.json"),
+            Err(_) => ".baton_midi_mapping.json".to_string(),
+        };
+
+        let midi_mapping = if let Ok(mut file) = File::open(&midi_mapping_file) {
+            let mut contents = String::new();
+            file.read_to_string(&mut contents).ok();
+            serde_json::from_str(&contents)
+                .unwrap_or_else(|_| midi_control::MidiMapping::create_default())
+        } else {
+            midi_control::MidiMapping::create_default()
         };
 
         let mut app = App {
@@ -97,7 +113,8 @@ impl App {
             input: Input::default(),
             input_mode: InputMode::Normal,
             midi_input,
-            midi_mapping: midi_control::MidiMapping::create_default(),
+            midi_mapping,
+            midi_learn_state: midi_control::MidiLearnState::Inactive,
         };
 
         app.set_active_strip(app.active_strip_index as isize);
@@ -114,7 +131,11 @@ impl App {
         }
         mix.strips.bus_strip.active = false;
 
-        mix.strips.iter_mut().nth(self.active_strip_index).unwrap().active = true;
+        mix.strips
+            .iter_mut()
+            .nth(self.active_strip_index)
+            .unwrap()
+            .active = true;
     }
 
     /// runs the application's main loop until the user quits
@@ -156,12 +177,8 @@ impl App {
         file.write_all(serialized.as_bytes()).unwrap();
         file.flush().unwrap();
 
-        // Save midi mapping
-        self.midi_mapping.sort_mappings();
-        let serialized_mapping = serde_json::to_string_pretty(&self.midi_mapping).unwrap();
-        let mut mapping_file = File::create(format!("{}/.baton_midi_mapping.json", env::var("HOME").unwrap_or_else(|_| ".".to_string()))).unwrap();
-        mapping_file.write_all(serialized_mapping.as_bytes()).unwrap();
-        mapping_file.flush().unwrap();
+        // Save MIDI mapping
+        self.save_midi_mapping();
 
         Ok(())
     }
@@ -169,6 +186,18 @@ impl App {
     fn on_tick(&mut self) {
         self.ps.poll_state();
         self.process_midi_messages();
+    }
+
+    // Add method to start learning
+    fn start_midi_learn(&mut self, control: midi_control::StripControl) {
+        let target = midi_control::ControlTarget::Strip(midi_control::StripTarget {
+            mix_index: self.active_mix_index,
+            strip_index: self.active_strip_index,
+            control,
+        });
+
+        self.midi_learn_state = self.midi_mapping.start_learning(target);
+        self.status_line = format!("MIDI Learn: Move a control to assign to {:?}", control);
     }
 
     fn process_midi_messages(&mut self) {
@@ -189,35 +218,80 @@ impl App {
                     controller,
                     value,
                 } => {
+                    let midi_control = midi_control::MidiControl {
+                        channel,
+                        cc: controller,
+                    };
+
+                    // Check if we're in learn mode
+                    if self.midi_learn_state != midi_control::MidiLearnState::Inactive {
+                        let default_range = match &self.midi_learn_state {
+                            midi_control::MidiLearnState::Learning { target } => {
+                                midi_control::MidiMapping::default_range_for_control(match target {
+                                    midi_control::ControlTarget::Strip(strip_target) => {
+                                        &strip_target.control
+                                    }
+                                    _ => &midi_control::StripControl::Fader, // Default fallback
+                                })
+                            }
+                            _ => continue,
+                        };
+
+                        if self.midi_mapping.learn_mapping(
+                            &self.midi_learn_state,
+                            midi_control,
+                            default_range,
+                        ) {
+                            self.status_line = format!(
+                                "MIDI Learn: Assigned channel {} CC {}",
+                                channel, controller
+                            );
+                            self.midi_learn_state = midi_control::MidiLearnState::Inactive;
+
+                            // Save the mapping
+                            self.save_midi_mapping();
+                        }
+                        continue;
+                    }
+
+                    // Normal MIDI processing
                     log::debug!(
                         "MIDI CC: channel={}, controller={}, value={}",
                         channel,
                         controller,
                         value
                     );
-                    self.handle_midi_control_change(channel, controller, value);
+
+                    if let Some(target) = self.midi_mapping.get_target(&midi_control).cloned() {
+                        let transformed_value =
+                            self.midi_mapping.transform_value(&midi_control, value);
+
+                        match target {
+                            midi_control::ControlTarget::Strip(strip_target) => {
+                                self.handle_strip_control(&strip_target, transformed_value);
+                            }
+                            midi_control::ControlTarget::Global(global_control) => {
+                                self.handle_global_control(&global_control, value);
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
-    fn handle_midi_control_change(&mut self, channel: u8, controller: u8, value: u8) {
-        let midi_control = MidiControl {
-            channel,
-            cc: controller,
+    // Add method to save MIDI mapping
+    fn save_midi_mapping(&mut self) {
+        let midi_mapping_file = match env::var("HOME") {
+            Ok(h) => format!("{h}/.baton_midi_mapping.json"),
+            Err(_) => ".baton_midi_mapping.json".to_string(),
         };
 
-        // Clone the target to avoid holding a borrow of self.midi_mapping
-        if let Some(target) = self.midi_mapping.get_target(&midi_control).cloned() {
-            let transformed_value = self.midi_mapping.transform_value(&midi_control, value);
-
-            match target {
-                ControlTarget::Strip(strip_target) => {
-                    self.handle_strip_control(&strip_target, transformed_value);
-                }
-                ControlTarget::Global(global_control) => {
-                    self.handle_global_control(&global_control, value);
-                }
+        self.midi_mapping.sort_mappings();
+        if let Ok(json) = serde_json::to_string_pretty(&self.midi_mapping) {
+            if let Ok(mut file) = File::create(&midi_mapping_file) {
+                let _ = file.write_all(json.as_bytes());
+                let _ = file.flush();
             }
         }
     }
@@ -271,12 +345,21 @@ impl App {
                     .write_channel_fader(target.mix_index, target.strip_index);
             }
             midi_control::StripControl::Mute => {
-                strip.mute = value >= 63.0;
+                if value >= 63.0 {
+                    self.ps.mixes[target.mix_index]
+                        .strips
+                        .iter_mut()
+                        .nth(target.strip_index)
+                        .unwrap()
+                        .mute = !strip.mute;
+                }
                 self.ps.write_state();
             }
             midi_control::StripControl::Solo => {
-                strip.solo = value >= 63.0;
-                self.ps.write_state();
+                if value >= 63.0 {
+                    self.ps.mixes[target.mix_index].toggle_solo(target.strip_index);
+                    self.ps.write_state();
+                }
             }
         }
     }
@@ -293,8 +376,12 @@ impl App {
         .areas(frame.area());
 
         // Compose status text
-        self.status_line.clear();
-        let active_strip = self.ps.mixes[self.active_mix_index].strips.iter().nth(self.active_strip_index).unwrap();
+        //self.status_line.clear();
+        let active_strip = self.ps.mixes[self.active_mix_index]
+            .strips
+            .iter()
+            .nth(self.active_strip_index)
+            .unwrap();
         let name = if self.active_strip_index < self.ps.channel_names.len() {
             self.ps.channel_names[self.active_strip_index].as_str()
         } else {
@@ -306,17 +393,17 @@ impl App {
             self.ps.bus_meters[self.active_mix_index * 2].value
         };
 
-        self.status_line.push_str(&format!(
-            "{} ({:>5.1} dB) balance: {}, solo: {}, mute: {}, mute_by_solo: {}, meter: {:>.3}, meter height: {}",
-            name,
-            active_strip.fader,
-            active_strip.balance,
-            active_strip.solo,
-            active_strip.mute,
-            active_strip.mute_by_solo,
-            meter_value,
-            self.meter_heigth,
-        ));
+        // self.status_line.push_str(&format!(
+        //     "{} ({:>5.1} dB) balance: {}, solo: {}, mute: {}, mute_by_solo: {}, meter: {:>.3}, meter height: {}",
+        //     name,
+        //     active_strip.fader,
+        //     active_strip.balance,
+        //     active_strip.solo,
+        //     active_strip.mute,
+        //     active_strip.mute_by_solo,
+        //     meter_value,
+        //     self.meter_heigth,
+        // ));
         let status_line = Line::from(self.status_line.as_str()).left_aligned();
 
         // Autoscroll left and right
@@ -530,6 +617,33 @@ impl App {
             KeyCode::Char('s') => self.toggle_solo(),
             KeyCode::Char('b') => self.toggle_bypass(),
             KeyCode::Char(' ') => self.clear_clip_indicators(),
+            KeyCode::Char('F') => {
+                if key_event.modifiers == KeyModifiers::SHIFT {
+                    self.start_midi_learn(midi_control::StripControl::Fader);
+                }
+            }
+            KeyCode::Char('B') => {
+                if key_event.modifiers == KeyModifiers::SHIFT {
+                    self.start_midi_learn(midi_control::StripControl::Balance);
+                }
+            }
+            KeyCode::Char('M') => {
+                if key_event.modifiers == KeyModifiers::SHIFT {
+                    self.start_midi_learn(midi_control::StripControl::Mute);
+                }
+            }
+            KeyCode::Char('S') => {
+                if key_event.modifiers == KeyModifiers::SHIFT {
+                    self.start_midi_learn(midi_control::StripControl::Solo);
+                }
+            }
+            KeyCode::Esc => {
+                // Cancel learn mode if active
+                if self.midi_learn_state != midi_control::MidiLearnState::Inactive {
+                    self.midi_learn_state = midi_control::MidiLearnState::Inactive;
+                    self.status_line = "MIDI Learn cancelled".to_string();
+                }
+            }
             KeyCode::Char('r') => self.start_editing(InputMode::Rename),
             KeyCode::Char(':') => self.start_editing(InputMode::Command),
             KeyCode::PageDown => self.increment_meter_heigth(1),
@@ -606,8 +720,11 @@ impl App {
     }
 
     fn increment_fader(&mut self, delta: f64) {
-        let strip =
-            &mut self.ps.mixes[self.active_mix_index].strips.iter_mut().nth(self.active_strip_index).unwrap();
+        let strip = &mut self.ps.mixes[self.active_mix_index]
+            .strips
+            .iter_mut()
+            .nth(self.active_strip_index)
+            .unwrap();
         let current = strip.fader;
         strip.set_fader(current + delta);
         self.write_active_fader();
@@ -799,18 +916,34 @@ impl App {
     // }
 
     fn meters_barchart(&self, mix: &usb::Mix) -> BarChart<'_> {
-        let mut bars: Vec<Bar> = self.ps.channel_meters.iter().enumerate().map(|(i, meter)| {
-            self.meter_bar(
-                meter.clip,
-                self.ps.channel_names[i].as_str(),
-                meter.value,
-                meter.max,
-            )
-        }).collect();
+        let mut bars: Vec<Bar> = self
+            .ps
+            .channel_meters
+            .iter()
+            .enumerate()
+            .map(|(i, meter)| {
+                self.meter_bar(
+                    meter.clip,
+                    self.ps.channel_names[i].as_str(),
+                    meter.value,
+                    meter.max,
+                )
+            })
+            .collect();
         let bus_meter_left = &self.ps.bus_meters[self.active_mix_index * 2];
         let bus_meter_right = &self.ps.bus_meters[self.active_mix_index * 2 + 1];
-        bars.push(self.meter_bar(bus_meter_left.clip, &mix.name, bus_meter_left.value, bus_meter_left.max));
-        bars.push(self.meter_bar(bus_meter_right.clip, &mix.name, bus_meter_right.value, bus_meter_right.max));
+        bars.push(self.meter_bar(
+            bus_meter_left.clip,
+            &mix.name,
+            bus_meter_left.value,
+            bus_meter_left.max,
+        ));
+        bars.push(self.meter_bar(
+            bus_meter_right.clip,
+            &mix.name,
+            bus_meter_right.value,
+            bus_meter_right.max,
+        ));
         let title = "Meters";
         let title = Line::from(title).centered().bold();
 
@@ -821,13 +954,7 @@ impl App {
             .max(500)
     }
 
-    fn meter_bar(
-        &self,
-        clip: bool,
-        name: &str,
-        meter_value: f64,
-        meter_max_value: f64,
-    ) -> Bar<'_> {
+    fn meter_bar(&self, clip: bool, name: &str, meter_value: f64, meter_max_value: f64) -> Bar<'_> {
         let a = -50.0;
         let b = 0.0;
         let c = 0.0;
