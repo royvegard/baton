@@ -202,3 +202,243 @@ impl ValueRange {
         self.target_min + curved * (self.target_max - self.target_min)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_mapping_is_empty() {
+        let mapping = MidiMapping::new();
+        assert_eq!(mapping.mappings.len(), 0);
+    }
+
+    #[test]
+    fn test_map_strip() {
+        let mut mapping = MidiMapping::new();
+        let midi = MidiControl { channel: 0, cc: 1 };
+        let target = StripTarget {
+            mix_index: 0,
+            strip_index: 0,
+            control: StripControl::Fader,
+        };
+        
+        mapping.map_strip(midi, target, None);
+        
+        assert_eq!(mapping.mappings.len(), 1);
+        assert_eq!(mapping.mappings[0].midi, midi);
+        match &mapping.mappings[0].target {
+            ControlTarget::Strip(t) => assert_eq!(*t, target),
+            _ => panic!("Expected Strip target"),
+        }
+    }
+
+    #[test]
+    fn test_map_global() {
+        let mut mapping = MidiMapping::new();
+        let midi = MidiControl { channel: 0, cc: 102 };
+        
+        mapping.map_global(midi, GlobalControl::PhantomPower);
+        
+        assert_eq!(mapping.mappings.len(), 1);
+        assert_eq!(mapping.mappings[0].midi, midi);
+        match &mapping.mappings[0].target {
+            ControlTarget::Global(GlobalControl::PhantomPower) => {},
+            _ => panic!("Expected PhantomPower global target"),
+        }
+    }
+
+    #[test]
+    fn test_get_target() {
+        let mut mapping = MidiMapping::new();
+        let midi = MidiControl { channel: 0, cc: 1 };
+        let target = StripTarget {
+            mix_index: 0,
+            strip_index: 0,
+            control: StripControl::Fader,
+        };
+        
+        mapping.map_strip(midi, target, None);
+        
+        let found = mapping.get_target(&midi);
+        assert!(found.is_some());
+        
+        let not_found = mapping.get_target(&MidiControl { channel: 1, cc: 1 });
+        assert!(not_found.is_none());
+    }
+
+    #[test]
+    fn test_sort_mappings() {
+        let mut mapping = MidiMapping::new();
+        
+        // Add in random order
+        mapping.map_strip(
+            MidiControl { channel: 0, cc: 10 },
+            StripTarget { mix_index: 0, strip_index: 0, control: StripControl::Balance },
+            None,
+        );
+        mapping.map_strip(
+            MidiControl { channel: 1, cc: 5 },
+            StripTarget { mix_index: 0, strip_index: 1, control: StripControl::Fader },
+            None,
+        );
+        mapping.map_strip(
+            MidiControl { channel: 0, cc: 2 },
+            StripTarget { mix_index: 0, strip_index: 2, control: StripControl::Fader },
+            None,
+        );
+        mapping.map_strip(
+            MidiControl { channel: 0, cc: 102 },
+            StripTarget { mix_index: 0, strip_index: 3, control: StripControl::Fader },
+            None,
+        );
+        
+        mapping.sort_mappings();
+        
+        // Check sorted order
+        assert_eq!(mapping.mappings[0].midi, MidiControl { channel: 0, cc: 2 });
+        assert_eq!(mapping.mappings[1].midi, MidiControl { channel: 0, cc: 10 });
+        assert_eq!(mapping.mappings[2].midi, MidiControl { channel: 0, cc: 102 });
+        assert_eq!(mapping.mappings[3].midi, MidiControl { channel: 1, cc: 5 });
+    }
+
+    #[test]
+    fn test_transform_value_with_range() {
+        let mut mapping = MidiMapping::new();
+        let midi = MidiControl { channel: 0, cc: 1 };
+        let target = StripTarget {
+            mix_index: 0,
+            strip_index: 0,
+            control: StripControl::Fader,
+        };
+        let range = ValueRange {
+            midi_min: 0,
+            midi_max: 127,
+            target_min: -96.0,
+            target_max: 10.0,
+            curve: Curve::Linear,
+        };
+        
+        mapping.map_strip(midi, target, Some(range));
+        
+        // Test min value
+        let result = mapping.transform_value(&midi, 0);
+        assert_eq!(result, -96.0);
+        
+        // Test max value
+        let result = mapping.transform_value(&midi, 127);
+        assert_eq!(result, 10.0);
+        
+        // Test mid value (should be around -43.0)
+        let result = mapping.transform_value(&midi, 64);
+        assert!((result - (-43.0)).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_transform_value_without_range() {
+        let mapping = MidiMapping::new();
+        let midi = MidiControl { channel: 0, cc: 1 };
+        
+        // Should default to 0.0-1.0 mapping
+        let result = mapping.transform_value(&midi, 0);
+        assert_eq!(result, 0.0);
+        
+        let result = mapping.transform_value(&midi, 127);
+        assert_eq!(result, 1.0);
+        
+        let result = mapping.transform_value(&midi, 64);
+        assert!((result - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_value_range_linear() {
+        let range = ValueRange {
+            midi_min: 0,
+            midi_max: 100,
+            target_min: 0.0,
+            target_max: 100.0,
+            curve: Curve::Linear,
+        };
+        
+        assert_eq!(range.transform(0), 0.0);
+        assert_eq!(range.transform(50), 50.0);
+        assert_eq!(range.transform(100), 100.0);
+    }
+
+    #[test]
+    fn test_value_range_exponential() {
+        let range = ValueRange {
+            midi_min: 0,
+            midi_max: 100,
+            target_min: 0.0,
+            target_max: 100.0,
+            curve: Curve::Exponential,
+        };
+        
+        // Exponential curve: slower at start, faster at end
+        assert_eq!(range.transform(0), 0.0);
+        assert_eq!(range.transform(50), 25.0); // 0.5^2 * 100 = 25
+        assert_eq!(range.transform(100), 100.0);
+    }
+
+    #[test]
+    fn test_value_range_logarithmic() {
+        let range = ValueRange {
+            midi_min: 0,
+            midi_max: 100,
+            target_min: 0.0,
+            target_max: 100.0,
+            curve: Curve::Logarithmic,
+        };
+        
+        // Logarithmic curve: faster at start, slower at end
+        assert_eq!(range.transform(0), 0.0);
+        assert!((range.transform(25) - 50.0).abs() < 0.1); // sqrt(0.25) * 100 ≈ 50
+        assert_eq!(range.transform(100), 100.0);
+    }
+
+    #[test]
+    fn test_create_default() {
+        let mapping = MidiMapping::create_default();
+        
+        // Should have 8 faders + 8 balance + 1 global = 17 mappings
+        assert_eq!(mapping.mappings.len(), 17);
+        
+        // Check first fader
+        let first = &mapping.mappings[0];
+        assert_eq!(first.midi.channel, 0);
+        assert_eq!(first.midi.cc, 1);
+        match &first.target {
+            ControlTarget::Strip(t) => {
+                assert_eq!(t.control, StripControl::Fader);
+                assert_eq!(t.strip_index, 0);
+            }
+            _ => panic!("Expected strip target"),
+        }
+        
+        // Check phantom power global control
+        let phantom = mapping.mappings.iter().find(|e| e.midi.cc == 102).unwrap();
+        match &phantom.target {
+            ControlTarget::Global(GlobalControl::PhantomPower) => {},
+            _ => panic!("Expected PhantomPower"),
+        }
+    }
+
+    #[test]
+    fn test_serialization_roundtrip() {
+        let mut mapping = MidiMapping::create_default();
+        mapping.sort_mappings();
+        
+        // Serialize to JSON
+        let json = serde_json::to_string_pretty(&mapping).unwrap();
+        
+        // Deserialize back
+        let deserialized: MidiMapping = serde_json::from_str(&json).unwrap();
+        
+        // Should have same number of mappings
+        assert_eq!(mapping.mappings.len(), deserialized.mappings.len());
+        
+        // Check first mapping matches
+        assert_eq!(mapping.mappings[0].midi, deserialized.mappings[0].midi);
+    }
+}
