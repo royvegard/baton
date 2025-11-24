@@ -722,14 +722,14 @@ fn render_pan_widgets(&self, frame: &mut Frame, pan_area: Rect) {
             }
             KeyCode::Left => {
                 if key_event.modifiers == KeyModifiers::CONTROL {
-                    self.increment_strip_width(-1);
+                    self.increment_strip_width(-2);
                 } else {
                     self.decrement_strip();
                 }
             }
             KeyCode::Right => {
                 if key_event.modifiers == KeyModifiers::CONTROL {
-                    self.increment_strip_width(1);
+                    self.increment_strip_width(2);
                 } else {
                     self.increment_strip();
                 }
@@ -783,7 +783,10 @@ fn render_pan_widgets(&self, frame: &mut Frame, pan_area: Rect) {
     }
 
     fn increment_strip_width(&mut self, delta: i16) {
-        let w = ((self.strip_width as i16 + delta).clamp(1, 15)) as u16;
+        let mut w = ((self.strip_width as i16 + delta).clamp(1, 15)) as u16;
+        if w % 2 == 0 {
+            w += 1;
+        }
         self.strip_width = w;
     }
 
