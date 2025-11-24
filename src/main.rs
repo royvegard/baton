@@ -3,7 +3,7 @@ use pan::Pan;
 use ratatui::{
     DefaultTerminal, Frame,
     crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
-    layout::{Constraint, Layout, Margin},
+    layout::{Constraint, Layout, Margin, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span},
     widgets::{Bar, BarChart, BarGroup, Block, Paragraph},
@@ -364,145 +364,184 @@ impl App {
         }
     }
 
-    fn draw(&mut self, frame: &mut Frame) {
-        let [state_area, meters_area, pan_area, strips_area, status_area] = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Percentage(self.meter_heigth),
-            Constraint::Length(1),
-            Constraint::Fill(1),
-            Constraint::Length(3),
-        ])
-        .spacing(0)
-        .areas(frame.area());
+fn draw(&mut self, frame: &mut Frame) {
+    let [state_area, meters_area, pan_area, strips_area, status_area] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Percentage(self.meter_heigth),
+        Constraint::Length(1),
+        Constraint::Fill(1),
+        Constraint::Length(3),
+    ])
+    .spacing(0)
+    .areas(frame.area());
 
-        // Compose status text
-        //self.status_line.clear();
-        let active_strip = self.ps.mixes[self.active_mix_index]
-            .strips
-            .iter()
-            .nth(self.active_strip_index)
-            .unwrap();
-        let name = if self.active_strip_index < self.ps.channel_names.len() {
-            self.ps.channel_names[self.active_strip_index].as_str()
-        } else {
-            &self.ps.mixes[self.active_mix_index].name
-        };
-        let meter_value = if self.active_strip_index < self.ps.channel_meters.len() {
-            self.ps.channel_meters[self.active_strip_index].value
-        } else {
-            self.ps.bus_meters[self.active_mix_index * 2].value
-        };
+    // Compose status text
+    let active_strip = self.ps.mixes[self.active_mix_index]
+        .strips
+        .iter()
+        .nth(self.active_strip_index)
+        .unwrap();
+    let name = if self.active_strip_index < self.ps.channel_names.len() {
+        self.ps.channel_names[self.active_strip_index].as_str()
+    } else {
+        &self.ps.mixes[self.active_mix_index].name
+    };
+    let meter_value = if self.active_strip_index < self.ps.channel_meters.len() {
+        self.ps.channel_meters[self.active_strip_index].value
+    } else {
+        self.ps.bus_meters[self.active_mix_index * 2].value
+    };
 
-        // self.status_line.push_str(&format!(
-        //     "{} ({:>5.1} dB) balance: {}, solo: {}, mute: {}, mute_by_solo: {}, meter: {:>.3}, meter height: {}",
-        //     name,
-        //     active_strip.fader,
-        //     active_strip.balance,
-        //     active_strip.solo,
-        //     active_strip.mute,
-        //     active_strip.mute_by_solo,
-        //     meter_value,
-        //     self.meter_heigth,
-        // ));
-        let status_line = Line::from(self.status_line.as_str()).left_aligned();
+    let status_line = Line::from(self.status_line.as_str()).left_aligned();
 
-        // Autoscroll left and right
-        let strips_width = strips_area.inner(Margin::new(1, 1)).width;
-        let strip_display_cap = strips_width / (self.strip_width + 1) - 1;
-        while self.active_strip_index < self.first_strip_index {
-            self.first_strip_index -= 1;
-        }
-        while self.active_strip_index > self.first_strip_index + strip_display_cap as usize - 1 {
-            self.first_strip_index += 1;
-        }
+    // Autoscroll left and right
+    let strips_width = strips_area.inner(Margin::new(1, 1)).width;
+    let strip_display_cap = strips_width / (self.strip_width + 1) - 1;
+    while self.active_strip_index < self.first_strip_index {
+        self.first_strip_index -= 1;
+    }
+    while self.active_strip_index > self.first_strip_index + strip_display_cap as usize - 1 {
+        self.first_strip_index += 1;
+    }
 
-        // Compose state text
-        let spacer = Span::from("|").reset();
-        let mut phantom: Span = Span::from(" 48V ");
-        if self.ps.state.phantom == 0x01 {
-            phantom = phantom.style(Style::new().bold().black().on_blue());
-        } else {
-            phantom = phantom.style(Style::new().reset());
-        }
+    // Compose state text
+    let spacer = Span::from("|").reset();
+    let mut phantom: Span = Span::from(" 48V ");
+    if self.ps.state.phantom == 0x01 {
+        phantom = phantom.style(Style::new().bold().black().on_blue());
+    } else {
+        phantom = phantom.style(Style::new().reset());
+    }
 
-        let mut line: Span = Span::from(" 1-2 Line ");
-        if self.ps.state.line == 0x01 {
-            line = line.style(Style::new().bold().black().on_blue());
-        } else {
-            line = line.style(Style::new().reset());
-        }
+    let mut line: Span = Span::from(" 1-2 Line ");
+    if self.ps.state.line == 0x01 {
+        line = line.style(Style::new().bold().black().on_blue());
+    } else {
+        line = line.style(Style::new().reset());
+    }
 
-        let mut mute: Span = Span::from(" Mute ");
-        if self.ps.state.mute == 0x01 {
-            mute = mute.style(Style::new().bold().black().on_red());
-        } else {
-            mute = mute.style(Style::new().reset());
-        }
+    let mut mute: Span = Span::from(" Mute ");
+    if self.ps.state.mute == 0x01 {
+        mute = mute.style(Style::new().bold().black().on_red());
+    } else {
+        mute = mute.style(Style::new().reset());
+    }
 
-        let mut mono: Span = Span::from(" Mono ");
-        if self.ps.state.mono == 0x01 {
-            mono = mono.style(Style::new().bold().black().on_yellow());
-        } else {
-            mono = mono.style(Style::new().reset());
-        }
+    let mut mono: Span = Span::from(" Mono ");
+    if self.ps.state.mono == 0x01 {
+        mono = mono.style(Style::new().bold().black().on_yellow());
+    } else {
+        mono = mono.style(Style::new().reset());
+    }
 
-        let mut bypass: Span = Span::from(" Bypass ");
-        if self.bypass {
-            bypass = bypass.style(Style::new().bold().black().on_light_blue());
-        } else {
-            bypass = bypass.style(Style::new().reset());
-        }
+    let mut bypass: Span = Span::from(" Bypass ");
+    if self.bypass {
+        bypass = bypass.style(Style::new().bold().black().on_light_blue());
+    } else {
+        bypass = bypass.style(Style::new().reset());
+    }
 
-        let state_line = Line::from(vec![
-            phantom,
-            spacer.clone(),
-            line,
-            spacer.clone(),
-            mute,
-            spacer.clone(),
-            mono,
-            spacer,
-            bypass,
-        ]);
+    let state_line = Line::from(vec![
+        phantom,
+        spacer.clone(),
+        line,
+        spacer.clone(),
+        mute,
+        spacer.clone(),
+        mono,
+        spacer,
+        bypass,
+    ]);
 
-        frame.render_widget(state_line, state_area);
+    frame.render_widget(state_line, state_area);
+    frame.render_widget(
+        self.meters_barchart(&self.ps.mixes[self.active_mix_index]),
+        meters_area,
+    );
+    
+    // Render pan widgets for each visible channel strip
+    self.render_pan_widgets(frame, pan_area);
+    
+    frame.render_widget(
+        self.faders_barchart(&self.ps.mixes[self.active_mix_index]),
+        strips_area,
+    );
+
+    if self.input_mode == InputMode::Rename || self.input_mode == InputMode::Command {
+        let title = format!("{:?}", self.input_mode);
+        let width = status_area.width.max(3) - 3;
+        let style = Style::default();
+        let scroll = self.input.visual_scroll(width as usize);
+        let input = Paragraph::new(self.input.value())
+            .style(style)
+            .scroll((0, scroll as u16))
+            .block(Block::bordered().title(title));
+        frame.render_widget(input, status_area);
+        // Ratatui hides the cursor unless it's explicitly set. Position the  cursor past the
+        // end of the input text and one line down from the border to the input line
+        let x = self.input.visual_cursor().max(scroll) - scroll + 1;
+        frame.set_cursor_position((status_area.x + x as u16, status_area.y + 1))
+    } else {
         frame.render_widget(
-            self.meters_barchart(&self.ps.mixes[self.active_mix_index]),
-            meters_area,
+            Paragraph::new(status_line).block(Block::bordered().title("Status")),
+            status_area,
         );
-        frame.render_widget(
-            Pan {
-                balance: self.ps.mixes[self.active_mix_index].strips.channel_strips[0].balance
-                    as i64,
-            },
-            pan_area,
-        );
-        frame.render_widget(
-            self.faders_barchart(&self.ps.mixes[self.active_mix_index]),
-            strips_area,
-        );
+    }
+}
 
-        if self.input_mode == InputMode::Rename || self.input_mode == InputMode::Command {
-            let title = format!("{:?}", self.input_mode);
-            let width = status_area.width.max(3) - 3;
-            let style = Style::default();
-            let scroll = self.input.visual_scroll(width as usize);
-            let input = Paragraph::new(self.input.value())
-                .style(style)
-                .scroll((0, scroll as u16))
-                .block(Block::bordered().title(title));
-            frame.render_widget(input, status_area);
-            // Ratatui hides the cursor unless it's explicitly set. Position the  cursor past the
-            // end of the input text and one line down from the border to the input line
-            let x = self.input.visual_cursor().max(scroll) - scroll + 1;
-            frame.set_cursor_position((status_area.x + x as u16, status_area.y + 1))
+fn render_pan_widgets(&self, frame: &mut Frame, pan_area: Rect) {
+    // Calculate the number of visible strips
+    let mix = &self.ps.mixes[self.active_mix_index];
+    let num_channel_strips = mix.strips.channel_strips.len();
+    let visible_strips_count = (num_channel_strips + 1).min(
+        self.first_strip_index + (pan_area.width / (self.strip_width + 1)) as usize
+    );
+    
+    // Create layout constraints for each visible strip
+    let mut constraints = Vec::new();
+    let visible_end = visible_strips_count.min(num_channel_strips + 1);
+    
+    // Add 1 character offset to align with BarChart border
+    constraints.push(Constraint::Length(1));
+    
+    for i in self.first_strip_index..visible_end {
+        if i < num_channel_strips {
+            // Channel strip - add pan widget
+            constraints.push(Constraint::Length(self.strip_width));
+            constraints.push(Constraint::Length(1)); // Spacer
         } else {
-            frame.render_widget(
-                Paragraph::new(status_line).block(Block::bordered().title("Status")),
-                status_area,
-            );
+            // Bus/Main strip - add empty space (no pan widget)
+            constraints.push(Constraint::Length(self.strip_width));
+            constraints.push(Constraint::Length(1)); // Spacer
         }
     }
+    
+    // Remove the last spacer if exists
+    if constraints.len() > 1 {
+        constraints.pop();
+    }
+    
+    let pan_areas = Layout::horizontal(&constraints).split(pan_area);
+    
+    // Render pan widgets only for channel strips
+    // Start from index 1 to skip the offset area
+    let mut area_idx = 1;
+    for i in self.first_strip_index..visible_end {
+        if i < num_channel_strips {
+            // This is a channel strip - render pan widget
+            let strip = &mix.strips.channel_strips[i];
+            frame.render_widget(
+                Pan {
+                    balance: strip.balance as i64,
+                },
+                pan_areas[area_idx],
+            );
+        }
+        // else: This is bus/main strip - skip rendering pan widget
+        
+        area_idx += 2; // Skip to next strip (widget + spacer)
+    }
+}
 
     fn handle_events(&mut self) -> io::Result<()> {
         let event = event::read()?;
