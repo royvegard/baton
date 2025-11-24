@@ -365,12 +365,13 @@ impl App {
     }
 
 fn draw(&mut self, frame: &mut Frame) {
-    let [state_area, meters_area, pan_area, strips_area, status_area] = Layout::vertical([
+    let [state_area, meters_area, pan_area, strips_area, status_area, help_area] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Percentage(self.meter_heigth),
         Constraint::Length(1),
         Constraint::Fill(1),
         Constraint::Length(3),
+        Constraint::Length(1),
     ])
     .spacing(0)
     .areas(frame.area());
@@ -405,36 +406,36 @@ fn draw(&mut self, frame: &mut Frame) {
     }
 
     // Compose state text
-    let spacer = Span::from("|").reset();
-    let mut phantom: Span = Span::from(" 48V ");
+    let spacer = Span::from(" | ").reset();
+    let mut phantom: Span = Span::from("p: 48V");
     if self.ps.state.phantom == 0x01 {
         phantom = phantom.style(Style::new().bold().black().on_blue());
     } else {
         phantom = phantom.style(Style::new().reset());
     }
 
-    let mut line: Span = Span::from(" 1-2 Line ");
+    let mut line: Span = Span::from("l: 1-2 Line");
     if self.ps.state.line == 0x01 {
         line = line.style(Style::new().bold().black().on_blue());
     } else {
         line = line.style(Style::new().reset());
     }
 
-    let mut mute: Span = Span::from(" Mute ");
+    let mut mute: Span = Span::from("u: Mute");
     if self.ps.state.mute == 0x01 {
         mute = mute.style(Style::new().bold().black().on_red());
     } else {
         mute = mute.style(Style::new().reset());
     }
 
-    let mut mono: Span = Span::from(" Mono ");
+    let mut mono: Span = Span::from("o: Mono");
     if self.ps.state.mono == 0x01 {
         mono = mono.style(Style::new().bold().black().on_yellow());
     } else {
         mono = mono.style(Style::new().reset());
     }
 
-    let mut bypass: Span = Span::from(" Bypass ");
+    let mut bypass: Span = Span::from("b: Bypass");
     if self.bypass {
         bypass = bypass.style(Style::new().bold().black().on_light_blue());
     } else {
@@ -487,6 +488,9 @@ fn draw(&mut self, frame: &mut Frame) {
             status_area,
         );
     }
+
+    let help_text = Line::from("q: Quit | Arrows: Navigate | s: Solo | m: Mute | r: Rename | Shift+F/B/M/S: MIDI Learn Fader/Balance/Mute/Solo");
+    frame.render_widget(help_text, help_area);
 }
 
 fn render_pan_widgets(&self, frame: &mut Frame, pan_area: Rect) {
