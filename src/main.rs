@@ -19,7 +19,7 @@ use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 use usb::StripKind;
 
-use crate::midi_control::{ControlTarget, GlobalControl, MidiControl, StripTarget};
+use crate::midi_control::{GlobalControl, StripTarget};
 
 mod midi;
 mod midi_control;

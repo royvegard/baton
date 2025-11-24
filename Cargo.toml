@@ -17,5 +17,4 @@ serde_json = "1.0"
 #baton-studio = "0.1.0"
 baton-studio = { version = "0.1.0", path = "../baton_studio" }
 tui-input = "0.14.0"
-pipewire = "0.9.2"
 alsa = "0.10.0"
