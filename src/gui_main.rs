@@ -1,0 +1,741 @@
+// src/gui_main.rs
+use eframe::egui;
+use flexi_logger::{detailed_format, FileSpec};
+use std::{
+    env,
+    fs::File,
+    io::{Read, Write},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
+
+mod midi;
+mod midi_control;
+mod usb;
+
+enum StripAction {
+    None,
+    FaderChanged,
+    SoloToggled,
+}
+
+fn main() -> eframe::Result {
+    let _logger = flexi_logger::Logger::try_with_env()
+        .unwrap()
+        .log_to_file(FileSpec::default().suppress_timestamp())
+        .format(detailed_format)
+        .append()
+        .start()
+        .unwrap();
+
+    log::info!("Starting Baton GUI");
+
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1200.0, 800.0])
+            .with_min_inner_size([800.0, 600.0]),
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "Baton Mixer",
+        options,
+        Box::new(|cc| Ok(Box::new(BatonApp::new(cc)))),
+    )
+}
+
+struct BatonApp {
+    ps: Arc<Mutex<usb::PreSonusStudio1824c>>,
+    midi_input: Option<midi::MidiInput>,
+    midi_mapping: midi_control::MidiMapping,
+    midi_learn_state: midi_control::MidiLearnState,
+    active_mix_index: usize,
+    active_strip_index: usize,
+    last_tick: Instant,
+    tick_rate: Duration,
+    bypass: bool,
+    status_message: String,
+}
+
+impl BatonApp {
+    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        let midi_input = match midi::MidiInput::new() {
+            Ok(m) => {
+                log::info!("MIDI input initialized");
+                Some(m)
+            }
+            Err(e) => {
+                log::warn!("Failed to initialize MIDI input: {}", e);
+                None
+            }
+        };
+
+        // Load or create MIDI mapping
+        let midi_mapping_file = match env::var("HOME") {
+            Ok(h) => format!("{h}/.baton_midi_mapping.json"),
+            Err(_) => ".baton_midi_mapping.json".to_string(),
+        };
+
+        let midi_mapping = if let Ok(mut file) = File::open(&midi_mapping_file) {
+            let mut contents = String::new();
+            file.read_to_string(&mut contents).ok();
+            serde_json::from_str(&contents)
+                .unwrap_or_else(|_| midi_control::MidiMapping::create_default())
+        } else {
+            midi_control::MidiMapping::create_default()
+        };
+
+        let ps = Arc::new(Mutex::new(
+            usb::PreSonusStudio1824c::new().expect("Failed to open device"),
+        ));
+
+        // Load config
+        let config_file = match env::var("HOME") {
+            Ok(h) => format!("{h}/.baton.json"),
+            Err(_) => "baton.json".to_string(),
+        };
+
+        if let Ok(mut file) = File::open(&config_file) {
+            let mut serialized = String::new();
+            if file.read_to_string(&mut serialized).is_ok() {
+                let mut ps_lock = ps.lock().unwrap();
+                ps_lock.load_config(&serialized);
+                ps_lock.write_state();
+            }
+        }
+
+        Self {
+            ps,
+            midi_input,
+            midi_mapping,
+            midi_learn_state: midi_control::MidiLearnState::Inactive,
+            active_mix_index: 0,
+            active_strip_index: 0,
+            last_tick: Instant::now(),
+            tick_rate: Duration::from_millis(100),
+            bypass: false,
+            status_message: String::new(),
+        }
+    }
+
+    fn process_midi_messages(&mut self) {
+        let midi_input = match &self.midi_input {
+            Some(m) => m,
+            None => return,
+        };
+
+        // Collect messages to process
+        let mut messages = Vec::new();
+        while let Some(msg) = midi_input.try_recv() {
+            messages.push(msg);
+        }
+
+        let mut should_save = false;
+
+        for msg in messages {
+            match msg {
+                midi::MidiMessage::ControlChange {
+                    channel,
+                    controller,
+                    value,
+                } => {
+                    let midi_control = midi_control::MidiControl {
+                        channel,
+                        cc: controller,
+                    };
+
+                    // Check if we're in learn mode
+                    if self.midi_learn_state != midi_control::MidiLearnState::Inactive {
+                        let default_range = match &self.midi_learn_state {
+                            midi_control::MidiLearnState::Learning { target } => {
+                                midi_control::MidiMapping::default_range_for_control(match target {
+                                    midi_control::ControlTarget::Strip(strip_target) => {
+                                        &strip_target.control
+                                    }
+                                    _ => &midi_control::StripControl::Fader,
+                                })
+                            }
+                            _ => continue,
+                        };
+
+                        if self.midi_mapping.learn_mapping(
+                            &self.midi_learn_state,
+                            midi_control,
+                            default_range,
+                        ) {
+                            self.status_message = format!(
+                                "MIDI Learn: Assigned channel {} CC {}",
+                                channel, controller
+                            );
+                            self.midi_learn_state = midi_control::MidiLearnState::Inactive;
+                            should_save = true;
+                        }
+                        continue;
+                    }
+
+                    // Normal MIDI processing
+                    if let Some(target) = self.midi_mapping.get_target(&midi_control).cloned() {
+                        let transformed_value =
+                            self.midi_mapping.transform_value(&midi_control, value);
+
+                        match target {
+                            midi_control::ControlTarget::Strip(strip_target) => {
+                                self.handle_strip_control(&strip_target, transformed_value);
+                            }
+                            midi_control::ControlTarget::Global(global_control) => {
+                                self.handle_global_control(&global_control, value);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if should_save {
+            self.save_midi_mapping();
+        }
+    }
+
+    fn handle_strip_control(&mut self, target: &midi_control::StripTarget, value: f64) {
+        let mut ps = self.ps.lock().unwrap();
+        let mix = &mut ps.mixes[target.mix_index];
+        let strip = mix.strips.iter_mut().nth(target.strip_index).unwrap();
+
+        match target.control {
+            midi_control::StripControl::Fader => {
+                strip.set_fader(value);
+                ps.write_channel_fader(target.mix_index, target.strip_index);
+            }
+            midi_control::StripControl::Balance => {
+                strip.balance = value.clamp(-100.0, 100.0);
+                ps.write_channel_fader(target.mix_index, target.strip_index);
+            }
+            midi_control::StripControl::Mute => {
+                strip.mute = !strip.mute;
+                ps.write_state();
+            }
+            midi_control::StripControl::Solo => {
+                ps.mixes[target.mix_index].toggle_solo(target.strip_index);
+                ps.write_state();
+            }
+        }
+    }
+
+    fn handle_global_control(&mut self, control: &midi_control::GlobalControl, value: u8) {
+        let mut ps = self.ps.lock().unwrap();
+        match control {
+            midi_control::GlobalControl::PhantomPower => {
+                if value > 63 {
+                    let phantom_power = ps.phantom_power;
+                    ps.set_phantom_power(!phantom_power);
+                }
+            }
+            midi_control::GlobalControl::Line1_2 => {
+                if value > 63 {
+                    let in_1_2_line = ps.in_1_2_line;
+                    ps.set_1_2_line(!in_1_2_line);
+                }
+            }
+            midi_control::GlobalControl::MainMute => {
+                if value > 63 {
+                    let main_mute = ps.main_mute;
+                    ps.set_main_mute(!main_mute);
+                }
+            }
+            midi_control::GlobalControl::MainMono => {
+                if value > 63 {
+                    let main_mono = ps.main_mono;
+                    ps.set_main_mono(!main_mono);
+                }
+            }
+            midi_control::GlobalControl::ActiveMixSelect => {
+                let mix_index = ((value as f64 / 127.0) * 8.0) as usize;
+                self.active_mix_index = mix_index.min(8);
+            }
+            midi_control::GlobalControl::ActiveStripSelect => {
+                let strip_index = ((value as f64 / 127.0) * 10.0) as usize;
+                self.active_strip_index = strip_index;
+            }
+        }
+    }
+
+    fn save_midi_mapping(&mut self) {
+        let midi_mapping_file = match env::var("HOME") {
+            Ok(h) => format!("{h}/.baton_midi_mapping.json"),
+            Err(_) => ".baton_midi_mapping.json".to_string(),
+        };
+
+        self.midi_mapping.sort_mappings();
+        if let Ok(json) = serde_json::to_string_pretty(&self.midi_mapping) {
+            if let Ok(mut file) = File::create(&midi_mapping_file) {
+                let _ = file.write_all(json.as_bytes());
+                let _ = file.flush();
+            }
+        }
+    }
+
+    fn draw_strip(
+        ui: &mut egui::Ui,
+        strip: &mut usb::Strip,
+        name: &str,
+        meter_value: f64,
+    ) -> StripAction {
+        let mut action = StripAction::None;
+        
+        ui.vertical(|ui| {
+            ui.set_width(90.0);
+            ui.set_min_height(500.0);
+
+            // Strip name
+            ui.label(egui::RichText::new(name).strong());
+
+            // Meter
+            let meter_height = 200.0;
+            let meter_normalized = ((meter_value + 50.0) / 50.0).clamp(0.0, 1.0);
+            
+            let meter_color = if meter_value > -3.0 {
+                egui::Color32::RED
+            } else if meter_value > -6.0 {
+                egui::Color32::from_rgb(255, 165, 0)
+            } else if meter_value > -9.0 {
+                egui::Color32::YELLOW
+            } else if meter_value > -18.0 {
+                egui::Color32::GREEN
+            } else {
+                egui::Color32::from_rgb(0, 185, 0)
+            };
+
+            // Draw vertical meter using a custom widget
+            let (rect, _response) = ui.allocate_exact_size(
+                egui::vec2(20.0, meter_height),
+                egui::Sense::hover(),
+            );
+            if ui.is_rect_visible(rect) {
+                let painter = ui.painter();
+                // Background
+                painter.rect_filled(rect, 2.0, egui::Color32::from_gray(40));
+                // Meter fill from bottom
+                let fill_height = meter_normalized as f32 * meter_height;
+                let fill_rect = egui::Rect::from_min_size(
+                    egui::pos2(rect.min.x, rect.max.y - fill_height),
+                    egui::vec2(rect.width(), fill_height),
+                );
+                painter.rect_filled(fill_rect, 2.0, meter_color);
+            }
+
+            // Fader value display
+            ui.label(format!("{:.1} dB", strip.fader));
+
+            // Custom Fader
+            let mut fader_value = strip.fader as f32;
+            ui.add_space(10.0);
+            
+            let fader_height = 300.0;
+            let fader_width = 40.0;
+            let track_width = 6.0;
+            let cap_height = 20.0;
+            let cap_width = 30.0;
+            
+            let (fader_rect, response) = ui.allocate_exact_size(
+                egui::vec2(fader_width, fader_height),
+                egui::Sense::click_and_drag(),
+            );
+            
+            if response.double_clicked() {
+                fader_value = 0.0;
+                strip.set_fader(0.0);
+                action = StripAction::FaderChanged;
+            } else if response.dragged() {
+                let delta_y = response.drag_delta().y;
+                // Convert pixel delta to dB range (-50 to +10)
+                let db_per_pixel = 60.0 / fader_height;
+                fader_value = (fader_value - delta_y * db_per_pixel).clamp(-50.0, 10.0);
+                strip.set_fader(fader_value as f64);
+                action = StripAction::FaderChanged;
+            }
+            
+            // Draw the fader
+            let painter = ui.painter();
+            
+            // Calculate cap position (0dB is at 5/6 height, linear scale from -50 to +10)
+            let normalized_pos = (fader_value + 50.0) / 60.0;
+            let cap_y = fader_rect.max.y - (normalized_pos * fader_height);
+            
+            // Draw track background
+            let track_rect = egui::Rect::from_center_size(
+                egui::pos2(fader_rect.center().x, fader_rect.center().y),
+                egui::vec2(track_width, fader_height),
+            );
+            painter.rect_filled(track_rect, 1.0, egui::Color32::from_gray(30));
+            
+            // Draw scale marks at 6dB intervals: +6, -6, -12, -18, -24, -30, -36, -42, -48
+            let db_marks = [6.0, -6.0, -12.0, -18.0, -24.0, -30.0, -36.0, -42.0, -48.0];
+            for &db_value in &db_marks {
+                // Calculate position for this dB value (linear scale)
+                let normalized_pos = (db_value + 50.0) / 60.0;
+                let mark_y = fader_rect.max.y - (normalized_pos * fader_height);
+                
+                painter.line_segment(
+                    [
+                        egui::pos2(fader_rect.min.x, mark_y),
+                        egui::pos2(fader_rect.max.x, mark_y),
+                    ],
+                    egui::Stroke::new(1.0, egui::Color32::from_gray(100)),
+                );
+                
+                // Draw dB label to the right of the tick mark
+                let label_text = if db_value > 0.0 {
+                    format!("+{:.0}", db_value)
+                } else {
+                    format!("{:.0}", db_value)
+                };
+                painter.text(
+                    egui::pos2(fader_rect.max.x + 18.0, mark_y),
+                    egui::Align2::RIGHT_CENTER,
+                    label_text,
+                    egui::FontId::proportional(9.0),
+                    egui::Color32::from_gray(150),
+                );
+            }
+            
+            // Draw 0dB marker line in yellow
+            let zero_db_normalized = (0.0 + 50.0) / 60.0;
+            let zero_db_y = fader_rect.max.y - (zero_db_normalized * fader_height);
+            painter.line_segment(
+                [
+                    egui::pos2(fader_rect.min.x, zero_db_y),
+                    egui::pos2(fader_rect.max.x, zero_db_y),
+                ],
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 200, 0)),
+            );
+            
+            // Draw 0dB label
+            painter.text(
+                egui::pos2(fader_rect.max.x + 18.0, zero_db_y),
+                egui::Align2::RIGHT_CENTER,
+                "0",
+                egui::FontId::proportional(9.0),
+                egui::Color32::from_rgb(255, 200, 0),
+            );
+            
+            // Draw fader cap
+            let cap_rect = egui::Rect::from_center_size(
+                egui::pos2(fader_rect.center().x, cap_y),
+                egui::vec2(cap_width, cap_height),
+            );
+            
+            // Cap shadow
+            painter.rect_filled(
+                cap_rect.translate(egui::vec2(1.0, 2.0)),
+                3.0,
+                egui::Color32::from_black_alpha(100),
+            );
+            
+            // Cap gradient effect
+            painter.rect_filled(cap_rect, 3.0, egui::Color32::from_gray(180));
+            painter.rect_stroke(cap_rect, 3.0, egui::Stroke::new(1.0, egui::Color32::from_gray(220)));
+            
+            // Cap highlight
+            let highlight_rect = egui::Rect::from_min_size(
+                cap_rect.min,
+                egui::vec2(cap_width, cap_height / 3.0),
+            );
+            painter.rect_filled(highlight_rect, 3.0, egui::Color32::from_gray(220));
+            
+            // Center grip line
+            painter.line_segment(
+                [
+                    egui::pos2(cap_rect.center().x - 8.0, cap_y),
+                    egui::pos2(cap_rect.center().x + 8.0, cap_y),
+                ],
+                egui::Stroke::new(2.0, egui::Color32::from_gray(100)),
+            );
+            
+            ui.add_space(10.0);
+
+            // Balance (only for channel strips)
+            if matches!(strip.kind, usb::StripKind::Channel) {
+                ui.label(format!("Pan: {:.0}", strip.balance));
+                let mut balance = strip.balance as f32;
+                
+                // Draw a knob control
+                let knob_radius = 25.0;
+                let (knob_rect, response) = ui.allocate_exact_size(
+                    egui::vec2(knob_radius * 2.0, knob_radius * 2.0),
+                    egui::Sense::click_and_drag(),
+                );
+                
+                if response.double_clicked() {
+                    balance = 0.0;
+                    strip.balance = 0.0;
+                    action = StripAction::FaderChanged;
+                } else if response.dragged() {
+                    let delta_y = response.drag_delta().y;
+                    balance = (balance - delta_y * 0.5).clamp(-100.0, 100.0);
+                    strip.balance = balance as f64;
+                    action = StripAction::FaderChanged;
+                }
+                
+                // Draw the knob
+                let painter = ui.painter();
+                let center = knob_rect.center();
+                
+                // Outer circle
+                painter.circle_filled(center, knob_radius, egui::Color32::from_gray(60));
+                painter.circle_stroke(center, knob_radius, egui::Stroke::new(2.0, egui::Color32::from_gray(100)));
+                
+                // Calculate angle from balance value (-100 to 100 -> -135° to 135°)
+                let angle = (balance / 100.0) * 2.356; // 135 degrees in radians
+                let indicator_length = knob_radius * 0.7;
+                let indicator_end = egui::pos2(
+                    center.x + angle.sin() * indicator_length,
+                    center.y - angle.cos() * indicator_length,
+                );
+                
+                // Indicator line
+                painter.line_segment(
+                    [center, indicator_end],
+                    egui::Stroke::new(3.0, egui::Color32::WHITE),
+                );
+                
+                // Center dot
+                painter.circle_filled(center, 3.0, egui::Color32::from_gray(200));
+            }
+
+            // Mute and Solo buttons side by side
+            ui.horizontal(|ui| {
+                // Mute button
+                let muted = strip.mute;
+                if ui
+                    .add(
+                        egui::Button::new(if muted { "M" } else { "M" })
+                            .min_size(egui::vec2(35.0, 25.0))
+                            .fill(if muted {
+                                egui::Color32::RED
+                            } else {
+                                egui::Color32::DARK_GRAY
+                            }),
+                    )
+                    .clicked()
+                {
+                    strip.mute = !muted;
+                    action = StripAction::FaderChanged;
+                }
+
+                // Solo button (only for channel strips)
+                if matches!(strip.kind, usb::StripKind::Channel) {
+                    let soloed = strip.solo;
+                    if ui
+                        .add(
+                            egui::Button::new(if soloed { "S" } else { "S" })
+                                .min_size(egui::vec2(35.0, 25.0))
+                                .fill(if soloed {
+                                    egui::Color32::YELLOW
+                                } else {
+                                    egui::Color32::DARK_GRAY
+                                }),
+                        )
+                        .clicked()
+                    {
+                        action = StripAction::SoloToggled;
+                    }
+                }
+            });
+        });
+        
+        action
+    }
+}
+
+impl eframe::App for BatonApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Poll device state periodically
+        if self.last_tick.elapsed() >= self.tick_rate {
+            let mut ps = self.ps.lock().unwrap();
+            ps.poll_state();
+            drop(ps);
+            self.process_midi_messages();
+            self.last_tick = Instant::now();
+        }
+
+        // Request repaint to keep UI responsive
+        ctx.request_repaint_after(self.tick_rate);
+
+        // Top panel with controls
+        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading("Baton Mixer");
+
+                ui.separator();
+
+                // Mix selector
+                ui.label("Mix:");
+                let ps = self.ps.lock().unwrap();
+                let mix_names: Vec<String> = ps.mixes.iter().map(|m| m.name.clone()).collect();
+                drop(ps);
+
+                egui::ComboBox::from_id_salt("mix_selector")
+                    .selected_text(&mix_names[self.active_mix_index])
+                    .show_ui(ui, |ui| {
+                        for (i, name) in mix_names.iter().enumerate() {
+                            ui.selectable_value(&mut self.active_mix_index, i, name);
+                        }
+                    });
+
+                ui.separator();
+
+                // Global controls
+                let mut ps = self.ps.lock().unwrap();
+                
+                let phantom_power = ps.phantom_power;
+                if ui
+                    .add(egui::Button::new("48V").fill(if phantom_power {
+                        egui::Color32::BLUE
+                    } else {
+                        egui::Color32::DARK_GRAY
+                    }))
+                    .clicked()
+                {
+                    ps.set_phantom_power(!phantom_power);
+                }
+
+                let in_1_2_line = ps.in_1_2_line;
+                if ui
+                    .add(egui::Button::new("1-2 Line").fill(if in_1_2_line {
+                        egui::Color32::BLUE
+                    } else {
+                        egui::Color32::DARK_GRAY
+                    }))
+                    .clicked()
+                {
+                    ps.set_1_2_line(!in_1_2_line);
+                }
+
+                let main_mute = ps.main_mute;
+                if ui
+                    .add(egui::Button::new("Mute").fill(if main_mute {
+                        egui::Color32::RED
+                    } else {
+                        egui::Color32::DARK_GRAY
+                    }))
+                    .clicked()
+                {
+                    ps.set_main_mute(!main_mute);
+                }
+
+                let main_mono = ps.main_mono;
+                if ui
+                    .add(egui::Button::new("Mono").fill(if main_mono {
+                        egui::Color32::YELLOW
+                    } else {
+                        egui::Color32::DARK_GRAY
+                    }))
+                    .clicked()
+                {
+                    ps.set_main_mono(!main_mono);
+                }
+
+                if ui
+                    .add(egui::Button::new("Bypass").fill(if self.bypass {
+                        egui::Color32::LIGHT_BLUE
+                    } else {
+                        egui::Color32::DARK_GRAY
+                    }))
+                    .clicked()
+                {
+                    self.bypass = !self.bypass;
+                    if self.bypass {
+                        ps.bypass_mixer();
+                    } else {
+                        ps.write_state();
+                    }
+                }
+            });
+        });
+
+        // Status bar
+        egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(&self.status_message);
+            });
+        });
+
+        // Central panel with strips
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::horizontal().show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    // Collect strip data
+                    let ps = self.ps.lock().unwrap();
+                    let strip_data: Vec<(String, f64)> = ps.channel_names
+                        .iter()
+                        .zip(ps.channel_meters.iter())
+                        .map(|(name, meter)| (name.clone(), meter.value))
+                        .collect();
+                    let bus_name = ps.mixes[self.active_mix_index].name.clone();
+                    let bus_meter = ps.bus_meters[self.active_mix_index * 2].value;
+                    drop(ps);
+
+                    let mut ps = self.ps.lock().unwrap();
+                    let mix = &mut ps.mixes[self.active_mix_index];
+                    let mut strip_actions = Vec::new();
+
+                    // Draw channel strips
+                    for (i, strip) in mix.strips.channel_strips.iter_mut().enumerate() {
+                        let (name, meter_value) = &strip_data[i];
+                        let action = Self::draw_strip(ui, strip, name, *meter_value);
+                        strip_actions.push((i, action));
+                        ui.separator();
+                    }
+
+                    // Draw bus strip
+                    let bus_strip = &mut mix.strips.bus_strip;
+                    let bus_action = Self::draw_strip(
+                        ui,
+                        bus_strip,
+                        &bus_name,
+                        bus_meter,
+                    );
+                    let bus_strip_index = mix.strips.channel_strips.len();
+                    strip_actions.push((bus_strip_index, bus_action));
+                    
+                    // Process actions
+                    for (strip_index, action) in strip_actions {
+                        match action {
+                            StripAction::FaderChanged => {
+                                ps.write_channel_fader(self.active_mix_index, strip_index);
+                            }
+                            StripAction::SoloToggled => {
+                                ps.mixes[self.active_mix_index].toggle_solo(strip_index);
+                                ps.write_state();
+                            }
+                            StripAction::None => {}
+                        }
+                    }
+                });
+            });
+        });
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        log::info!("Saving configuration...");
+
+        // Save config
+        let config_file = match env::var("HOME") {
+            Ok(h) => format!("{h}/.baton.json"),
+            Err(_) => "baton.json".to_string(),
+        };
+
+        {
+            let ps = self.ps.lock().unwrap();
+            if let Ok(serialized) = serde_json::to_string_pretty(&*ps) {
+                if let Ok(mut file) = File::create(&config_file) {
+                    let _ = file.write_all(serialized.as_bytes());
+                    let _ = file.flush();
+                }
+            }
+        }
+
+        // Save MIDI mapping
+        self.save_midi_mapping();
+    }
+}
