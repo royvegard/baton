@@ -20,48 +20,52 @@ impl Pan {
             width -= 1;
         }
         let center = area.left() + width / 2;
-        let resolution = width;
+
+        // Use sub-character resolution (6 horizontal positions per character)
+        let resolution = (width as f64) * 6.0;
 
         let a = -100.0;
         let b = 100.0;
         let c = 0.0;
-        let d = resolution as f64;
+        let d = resolution;
         let t = self.balance as f64;
 
-        let value = (c + ((d - c) / (b - a)) * (t - a)) as u16;
+        let pixel_position = c + ((d - c) / (b - a)) * (t - a);
+        let char_position = (pixel_position / 6.0) as u16;
+        let sub_position = (pixel_position % 6.0) as usize;
+
+        // Thin vertical bars at different horizontal positions
+        let bars = [
+            "🭰", // Leftmost
+            "🭱", // Left-center
+            "🭲", // Center-left
+            "🭳", // Center-right
+            "🭴", // Right-center
+            "🭵", // Rightmost
+        ];
 
         for y in area.top()..area.bottom() {
             for x in area.left()..area.left() + width {
-                //buf[(x, 0)].set_symbol("-⡇-  -⢸-");
-                if x == area.left() + value {
-                    buf[(x, y)].set_symbol("|");
+                let relative_x = x - area.left();
+
+                if relative_x == char_position {
+                    // Position indicator with sub-character precision
+                    buf[(x, y)].set_symbol(bars[sub_position]);
                 } else {
-                    buf[(x, y)].set_symbol("-");
+                    // Background line
+                    buf[(x, y)].set_symbol("─");
                 }
             }
         }
 
+        // Special indicators for extremes and center
         if self.balance == 0 {
-            buf[(center, area.top())].set_symbol("c");
+            buf[(center, area.top())].set_symbol("█");
         } else if self.balance <= -100 {
-            buf[(area.left(), area.top())].set_symbol("<");
+            buf[(area.left(), area.top())].set_symbol("◀");
         } else if self.balance >= 100 {
-            buf[(area.left() + width - 1, area.top())].set_symbol(">");
+            buf[(area.left() + width - 1, area.top())].set_symbol("▶");
         }
-
-        // Debug strings
-        // buf.set_string(
-        //     area.left(),
-        //     1,
-        //     format!("b:{} v:{}", self.balance, value),
-        //     Style::new(),
-        // );
-        // buf.set_string(
-        //     area.left(),
-        //     2,
-        //     format!("c:{} w:{}", center, width),
-        //     Style::new(),
-        // );
     }
 }
 
