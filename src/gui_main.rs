@@ -403,29 +403,49 @@ impl BatonApp {
             // Meter background
             painter.rect_filled(meter_rect, 2.0, egui::Color32::from_gray(20));
             
-            // Calculate meter fill using same scale as fader (-50 to +10 dB)
-            let meter_normalized = ((meter_value + 50.0) / 60.0).clamp(0.0, 1.0);
-            let meter_fill_height = (meter_normalized * fader_height as f64) as f32;
+            // Draw meter with colored segments
+            // Define color zones: (max_db, color)
+            let color_zones = [
+                (10.0, egui::Color32::RED),                          // -3 to +10 dB
+                (-3.0, egui::Color32::from_rgb(255, 165, 0)),       // -6 to -3 dB (orange)
+                (-6.0, egui::Color32::YELLOW),                       // -9 to -6 dB
+                (-9.0, egui::Color32::GREEN),                       // -18 to -9 dB
+                (-18.0, egui::Color32::from_rgb(0, 185, 0)),        // -50 to -18 dB (dark green)
+            ];
             
-            // Determine meter color based on dB value
-            let meter_color = if meter_value > -3.0 {
-                egui::Color32::RED
-            } else if meter_value > -6.0 {
-                egui::Color32::from_rgb(255, 165, 0)
-            } else if meter_value > -9.0 {
-                egui::Color32::YELLOW
-            } else if meter_value > -18.0 {
-                egui::Color32::GREEN
-            } else {
-                egui::Color32::from_rgb(0, 185, 0)
-            };
-            
-            // Meter fill from bottom
-            let meter_fill_rect = egui::Rect::from_min_size(
-                egui::pos2(meter_rect.min.x, meter_rect.max.y - meter_fill_height),
-                egui::vec2(meter_width, meter_fill_height),
-            );
-            painter.rect_filled(meter_fill_rect, 2.0, meter_color);
+            // Draw each segment up to the meter value
+            for i in 0..color_zones.len() {
+                let (max_db, color) = color_zones[i];
+                let min_db = if i < color_zones.len() - 1 {
+                    color_zones[i + 1].0
+                } else {
+                    -50.0
+                };
+                
+                // Only draw if meter reaches this segment
+                if meter_value >= min_db {
+                    let segment_max = max_db.min(meter_value);
+                    let segment_min = min_db.max(-50.0);
+                    
+                    if segment_max > segment_min {
+                        // Calculate positions for this segment
+                        let top_normalized = (segment_max + 50.0) / 60.0;
+                        let bottom_normalized = (segment_min + 50.0) / 60.0;
+                        
+                        let top_y = meter_rect.max.y - (top_normalized * fader_height as f64) as f32;
+                        let bottom_y = meter_rect.max.y - (bottom_normalized * fader_height as f64) as f32;
+                        let segment_height = bottom_y - top_y;
+                        
+                        if segment_height > 0.0 {
+                            let segment_rect = egui::Rect::from_min_size(
+                                egui::pos2(meter_rect.min.x, top_y),
+                                egui::vec2(meter_width, segment_height),
+                            );
+                            painter.rect_filled(segment_rect, 0.0, color);
+                        }
+                    }
+                }
+            }
             
             // Draw fader cap
             let cap_rect = egui::Rect::from_center_size(
