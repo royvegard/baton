@@ -112,7 +112,7 @@ impl BatonApp {
             active_mix_index: 0,
             active_strip_index: 0,
             last_tick: Instant::now(),
-            tick_rate: Duration::from_millis(50),
+            tick_rate: Duration::from_millis(25),
             bypass: false,
             status_message: String::new(),
         }
@@ -279,38 +279,27 @@ impl BatonApp {
         strip: &mut usb::Strip,
         name: &str,
         meter_value: f64,
+        available_height: f32,
     ) -> StripAction {
         let mut action = StripAction::None;
         
         ui.vertical(|ui| {
             ui.set_width(90.0);
-            ui.set_min_height(500.0);
 
             // Strip name
             ui.label(egui::RichText::new(name).strong());
 
-            // Display labels in horizontal layout with fixed widths
-            ui.horizontal(|ui| {
-                // Fader value display (fixed width)
-                ui.add_sized(
-                    egui::vec2(50.0, 20.0),
-                    egui::Label::new(format!("{:.1} dB", strip.fader))
-                );
-                
-                ui.add_space(5.0);
-                
-                // Meter value display (fixed width)
-                ui.add_sized(
-                    egui::vec2(50.0, 20.0),
-                    egui::Label::new(format!("{:.1} dB", meter_value))
-                );
-            });
+            // Fader value display
+            ui.label(format!("{:.1} dB", strip.fader));
 
             // Custom Fader
             let mut fader_value = strip.fader as f32;
             ui.add_space(10.0);
             
-            let fader_height = 300.0;
+            // Calculate fader height based on available space minus fixed elements
+            // Fixed elements: name label (~20), dB labels (~20), spacing (~20), pan knob (~60), buttons (~35)
+            let fixed_height = 155.0;
+            let fader_height = (available_height - fixed_height).max(200.0);
             let fader_width = 40.0;
             let track_width = 6.0;
             let cap_height = 20.0;
@@ -697,6 +686,9 @@ impl eframe::App for BatonApp {
 
         // Central panel with strips
         egui::CentralPanel::default().show(ctx, |ui| {
+            // Get available height for strips
+            let available_height = ui.available_height();
+            
             egui::ScrollArea::horizontal().show(ui, |ui| {
                 ui.horizontal(|ui| {
                     // Collect strip data
@@ -717,7 +709,7 @@ impl eframe::App for BatonApp {
                     // Draw channel strips
                     for (i, strip) in mix.strips.channel_strips.iter_mut().enumerate() {
                         let (name, meter_value) = &strip_data[i];
-                        let action = Self::draw_strip(ui, strip, name, *meter_value);
+                        let action = Self::draw_strip(ui, strip, name, *meter_value, available_height);
                         strip_actions.push((i, action));
                         ui.separator();
                     }
@@ -729,6 +721,7 @@ impl eframe::App for BatonApp {
                         bus_strip,
                         &bus_name,
                         bus_meter,
+                        available_height,
                     );
                     let bus_strip_index = mix.strips.channel_strips.len();
                     strip_actions.push((bus_strip_index, bus_action));
