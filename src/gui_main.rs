@@ -57,6 +57,7 @@ struct BatonApp {
     bypass: bool,
     status_message: String,
     clip_indicators: HashMap<String, Instant>, // Track clip times by meter ID
+    peak_holds: HashMap<String, (f64, Instant)>, // Track peak values and times by meter ID
 }
 
 impl BatonApp {
@@ -118,6 +119,7 @@ impl BatonApp {
             bypass: false,
             status_message: String::new(),
             clip_indicators: HashMap::new(),
+            peak_holds: HashMap::new(),
         }
     }
 
@@ -285,6 +287,7 @@ impl BatonApp {
         meter_value_right: Option<f64>,
         available_height: f32,
         clip_indicators: &mut HashMap<String, Instant>,
+        peak_holds: &mut HashMap<String, (f64, Instant)>,
         meter_id: &str,
     ) -> StripAction {
         let mut action = StripAction::None;
@@ -475,17 +478,37 @@ impl BatonApp {
             let meter_spacing = 2.0;
             let meter_x_start = fader_rect.max.x + 25.0;
             
-            // Check for clipping (meter value above -0.1 dB)
+            // Check for clipping (meter value above -0.1 dB) and update peak holds
             let clip_threshold = -0.1;
             let now = Instant::now();
             let clip_duration = Duration::from_secs(2);
+            let peak_hold_duration = Duration::from_millis(500);
             
-            if meter_value > clip_threshold {
-                clip_indicators.insert(format!("{}_L", meter_id), now);
+            // Update left/mono peak hold
+            let left_key = format!("{}_L", meter_id);
+            let left_peak_entry = peak_holds.entry(left_key.clone()).or_insert((-50.0, now));
+            // Reset if expired, otherwise update if new value is higher
+            if now.duration_since(left_peak_entry.1) >= peak_hold_duration {
+                *left_peak_entry = (meter_value, now);
+            } else if meter_value > left_peak_entry.0 {
+                *left_peak_entry = (meter_value, now);
             }
+            if meter_value > clip_threshold {
+                clip_indicators.insert(left_key.clone(), now);
+            }
+            
+            // Update right peak hold if stereo
             if let Some(right_val) = meter_value_right {
+                let right_key = format!("{}_R", meter_id);
+                let right_peak_entry = peak_holds.entry(right_key.clone()).or_insert((-50.0, now));
+                // Reset if expired, otherwise update if new value is higher
+                if now.duration_since(right_peak_entry.1) >= peak_hold_duration {
+                    *right_peak_entry = (right_val, now);
+                } else if right_val > right_peak_entry.0 {
+                    *right_peak_entry = (right_val, now);
+                }
                 if right_val > clip_threshold {
-                    clip_indicators.insert(format!("{}_R", meter_id), now);
+                    clip_indicators.insert(right_key.clone(), now);
                 }
             }
             
@@ -555,6 +578,20 @@ impl BatonApp {
                         egui::vec2(meter_width, clip_indicator_height),
                     );
                     painter.rect_filled(clip_rect, 0.0, egui::Color32::from_rgb(255, 0, 0));
+                }
+                
+                // Draw peak hold line
+                let peak_key = format!("{}_{}", meter_id, channel_suffix);
+                if let Some(&(peak_val, _)) = peak_holds.get(&peak_key) {
+                    let peak_normalized = (peak_val + 50.0) / 60.0;
+                    let peak_y = meter_rect.max.y - (peak_normalized * fader_height as f64) as f32;
+                    painter.line_segment(
+                        [
+                            egui::pos2(meter_rect.min.x, peak_y),
+                            egui::pos2(meter_rect.max.x, peak_y),
+                        ],
+                        egui::Stroke::new(2.0, egui::Color32::WHITE),
+                    );
                 }
             };
             
@@ -799,6 +836,7 @@ impl eframe::App for BatonApp {
                             None, 
                             available_height, 
                             &mut self.clip_indicators,
+                            &mut self.peak_holds,
                             &meter_id,
                         );
                         strip_actions.push((i, action));
@@ -816,6 +854,7 @@ impl eframe::App for BatonApp {
                         Some(bus_meter_right),
                         available_height,
                         &mut self.clip_indicators,
+                        &mut self.peak_holds,
                         &meter_id,
                     );
                     let bus_strip_index = mix.strips.channel_strips.len();
