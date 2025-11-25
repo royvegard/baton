@@ -284,11 +284,23 @@ impl BatonApp {
     ) -> StripAction {
         let mut action = StripAction::None;
         
-        ui.vertical(|ui| {
-            ui.set_width(90.0);
+        // Set background color based on strip kind
+        let bg_color = match strip.kind {
+            usb::StripKind::Main => egui::Color32::from_rgb(80, 80, 0), // Dark yellow
+            usb::StripKind::Bus => egui::Color32::from_rgb(20, 30, 50),  // Dark blue
+            usb::StripKind::Channel => egui::Color32::TRANSPARENT,        // No background for channels
+        };
+        
+        let frame = egui::Frame::none()
+            .fill(bg_color)
+            .inner_margin(egui::Margin::same(5.0));
+        
+        frame.show(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.set_width(90.0);
 
-            // Strip name
-            ui.label(egui::RichText::new(name).strong());
+                // Strip name
+                ui.label(egui::RichText::new(name).strong());
 
             // Balance knob at top (only for channel strips), or blank space for alignment
             if matches!(strip.kind, usb::StripKind::Channel) {
@@ -593,8 +605,9 @@ impl BatonApp {
                 }
             });
             
-            // Add padding at bottom to prevent scrollbar from obscuring buttons
-            ui.add_space(20.0);
+                // Add padding at bottom to prevent scrollbar from obscuring buttons
+                ui.add_space(20.0);
+            });
         });
         
         action
