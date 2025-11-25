@@ -112,7 +112,7 @@ impl BatonApp {
             active_mix_index: 0,
             active_strip_index: 0,
             last_tick: Instant::now(),
-            tick_rate: Duration::from_millis(100),
+            tick_rate: Duration::from_millis(50),
             bypass: false,
             status_message: String::new(),
         }
@@ -289,42 +289,16 @@ impl BatonApp {
             // Strip name
             ui.label(egui::RichText::new(name).strong());
 
-            // Meter
-            let meter_height = 200.0;
-            let meter_normalized = ((meter_value + 50.0) / 50.0).clamp(0.0, 1.0);
-            
-            let meter_color = if meter_value > -3.0 {
-                egui::Color32::RED
-            } else if meter_value > -6.0 {
-                egui::Color32::from_rgb(255, 165, 0)
-            } else if meter_value > -9.0 {
-                egui::Color32::YELLOW
-            } else if meter_value > -18.0 {
-                egui::Color32::GREEN
-            } else {
-                egui::Color32::from_rgb(0, 185, 0)
-            };
-
-            // Draw vertical meter using a custom widget
-            let (rect, _response) = ui.allocate_exact_size(
-                egui::vec2(20.0, meter_height),
-                egui::Sense::hover(),
-            );
-            if ui.is_rect_visible(rect) {
-                let painter = ui.painter();
-                // Background
-                painter.rect_filled(rect, 2.0, egui::Color32::from_gray(40));
-                // Meter fill from bottom
-                let fill_height = meter_normalized as f32 * meter_height;
-                let fill_rect = egui::Rect::from_min_size(
-                    egui::pos2(rect.min.x, rect.max.y - fill_height),
-                    egui::vec2(rect.width(), fill_height),
-                );
-                painter.rect_filled(fill_rect, 2.0, meter_color);
-            }
-
-            // Fader value display
-            ui.label(format!("{:.1} dB", strip.fader));
+            // Display labels in horizontal layout
+            ui.horizontal(|ui| {
+                // Fader value display
+                ui.label(format!("{:.1} dB", strip.fader));
+                
+                ui.add_space(5.0);
+                
+                // Meter value display
+                ui.label(format!("{:.1} dB", meter_value));
+            });
 
             // Custom Fader
             let mut fader_value = strip.fader as f32;
@@ -417,6 +391,41 @@ impl BatonApp {
                 egui::FontId::proportional(9.0),
                 egui::Color32::from_rgb(255, 200, 0),
             );
+            
+            // Draw meter to the right of the labels (using same scale as fader)
+            let meter_width = 12.0;
+            let meter_x = fader_rect.max.x + 25.0;
+            let meter_rect = egui::Rect::from_min_size(
+                egui::pos2(meter_x, fader_rect.min.y),
+                egui::vec2(meter_width, fader_height),
+            );
+            
+            // Meter background
+            painter.rect_filled(meter_rect, 2.0, egui::Color32::from_gray(20));
+            
+            // Calculate meter fill using same scale as fader (-50 to +10 dB)
+            let meter_normalized = ((meter_value + 50.0) / 60.0).clamp(0.0, 1.0);
+            let meter_fill_height = (meter_normalized * fader_height as f64) as f32;
+            
+            // Determine meter color based on dB value
+            let meter_color = if meter_value > -3.0 {
+                egui::Color32::RED
+            } else if meter_value > -6.0 {
+                egui::Color32::from_rgb(255, 165, 0)
+            } else if meter_value > -9.0 {
+                egui::Color32::YELLOW
+            } else if meter_value > -18.0 {
+                egui::Color32::GREEN
+            } else {
+                egui::Color32::from_rgb(0, 185, 0)
+            };
+            
+            // Meter fill from bottom
+            let meter_fill_rect = egui::Rect::from_min_size(
+                egui::pos2(meter_rect.min.x, meter_rect.max.y - meter_fill_height),
+                egui::vec2(meter_width, meter_fill_height),
+            );
+            painter.rect_filled(meter_fill_rect, 2.0, meter_color);
             
             // Draw fader cap
             let cap_rect = egui::Rect::from_center_size(
