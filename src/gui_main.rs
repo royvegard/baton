@@ -290,7 +290,7 @@ impl BatonApp {
             // Strip name
             ui.label(egui::RichText::new(name).strong());
 
-            // Balance knob at top (only for channel strips)
+            // Balance knob at top (only for channel strips), or blank space for alignment
             if matches!(strip.kind, usb::StripKind::Channel) {
                 ui.add_space(5.0);
                 
@@ -343,6 +343,15 @@ impl BatonApp {
                     painter.circle_filled(center, 3.0, egui::Color32::from_gray(200));
                 });
                 
+                ui.add_space(5.0);
+            } else {
+                // Add blank space for bus/main strips to align with channel strips
+                // Match the exact structure: spacing + vertical_centered with knob size + spacing
+                ui.add_space(5.0);
+                ui.vertical_centered(|ui| {
+                    let knob_radius = 25.0;
+                    ui.allocate_space(egui::vec2(knob_radius * 2.0, knob_radius * 2.0));
+                });
                 ui.add_space(5.0);
             }
 
