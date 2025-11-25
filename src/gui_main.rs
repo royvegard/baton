@@ -718,14 +718,22 @@ impl BatonApp {
                 // Solo button (only for channel strips)
                 if matches!(strip.kind, usb::StripKind::Channel) {
                     let soloed = strip.solo;
+                    let text_color = if soloed {
+                        egui::Color32::BLACK
+                    } else {
+                        egui::Color32::LIGHT_GRAY
+                    };
                     let solo_response = ui.add(
-                        egui::Button::new(if soloed { "S" } else { "S" })
-                            .min_size(egui::vec2(35.0, 25.0))
-                            .fill(if soloed {
-                                egui::Color32::YELLOW
-                            } else {
-                                egui::Color32::DARK_GRAY
-                            }),
+                        egui::Button::new(
+                            egui::RichText::new("S")
+                                .color(text_color)
+                        )
+                        .min_size(egui::vec2(35.0, 25.0))
+                        .fill(if soloed {
+                            egui::Color32::YELLOW
+                        } else {
+                            egui::Color32::DARK_GRAY
+                        }),
                     );
                     
                     if solo_response.secondary_clicked() {
@@ -848,6 +856,50 @@ impl eframe::App for BatonApp {
                     } else {
                         ps.write_state();
                     }
+                }
+
+                ui.separator();
+
+                // Reset solo button
+                let solo_exists = ps.mixes[self.active_mix_index].has_solo();
+                if ui
+                    .add(egui::Button::new(
+                        egui::RichText::new("Reset solo")
+                            .color(if solo_exists {
+                                egui::Color32::BLACK
+                            } else {
+                                egui::Color32::LIGHT_GRAY
+                            })
+                    ).fill(if solo_exists {
+                        egui::Color32::YELLOW
+                    } else {
+                        egui::Color32::DARK_GRAY
+                    }))
+                    .clicked()
+                {
+                    ps.mixes[self.active_mix_index].reset_solo();
+                    ps.write_state();
+                }
+
+                // Reset mute button
+                let mute_exists = ps.mixes[self.active_mix_index].has_mute();
+                if ui
+                    .add(egui::Button::new(
+                        egui::RichText::new("Reset mute")
+                            .color(if mute_exists {
+                                egui::Color32::BLACK
+                            } else {
+                                egui::Color32::LIGHT_GRAY
+                            })
+                    ).fill(if mute_exists {
+                        egui::Color32::RED
+                    } else {
+                        egui::Color32::DARK_GRAY
+                    }))
+                    .clicked()
+                {
+                    ps.mixes[self.active_mix_index].reset_mute();
+                    ps.write_state();
                 }
             });
         });

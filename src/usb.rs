@@ -735,4 +735,26 @@ impl Mix {
             }
         }
     }
+
+    pub fn has_solo(&self) -> bool {
+        self.strips.channel_strips.iter().any(|s| s.solo)
+    }
+
+    pub fn reset_solo(&mut self) {
+        for strip in self.strips.channel_strips.iter_mut() {
+            strip.solo = false;
+            strip.mute_by_solo = false;
+        }
+    }
+
+    pub fn has_mute(&self) -> bool {
+        self.strips.channel_strips.iter().any(|s| s.mute) || self.strips.bus_strip.mute
+    }
+
+    pub fn reset_mute(&mut self) {
+        for strip in self.strips.channel_strips.iter_mut() {
+            strip.mute = false;
+        }
+        self.strips.bus_strip.mute = false;
+    }
 }
