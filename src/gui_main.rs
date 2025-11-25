@@ -19,6 +19,9 @@ enum StripAction {
     FaderChanged,
     SoloToggled,
     StartMidiLearnFader,
+    StartMidiLearnPan,
+    StartMidiLearnMute,
+    StartMidiLearnSolo,
 }
 
 fn main() -> eframe::Result {
@@ -186,7 +189,7 @@ impl BatonApp {
 
                         match target {
                             midi_control::ControlTarget::Strip(strip_target) => {
-                                self.handle_strip_control(&strip_target, transformed_value);
+                                self.handle_strip_control(&strip_target, transformed_value, value);
                             }
                             midi_control::ControlTarget::Global(global_control) => {
                                 self.handle_global_control(&global_control, value);
@@ -202,7 +205,7 @@ impl BatonApp {
         }
     }
 
-    fn handle_strip_control(&mut self, target: &midi_control::StripTarget, value: f64) {
+    fn handle_strip_control(&mut self, target: &midi_control::StripTarget, value: f64, raw_value: u8) {
         let mut ps = self.ps.lock().unwrap();
         let mix = &mut ps.mixes[target.mix_index];
         let strip = mix.strips.iter_mut().nth(target.strip_index).unwrap();
@@ -217,12 +220,18 @@ impl BatonApp {
                 ps.write_channel_fader(target.mix_index, target.strip_index);
             }
             midi_control::StripControl::Mute => {
-                strip.mute = !strip.mute;
-                ps.write_state();
+                // Only toggle when MIDI value is >= 63 (button press)
+                if raw_value >= 63 {
+                    strip.mute = !strip.mute;
+                    ps.write_state();
+                }
             }
             midi_control::StripControl::Solo => {
-                ps.mixes[target.mix_index].toggle_solo(target.strip_index);
-                ps.write_state();
+                // Only toggle when MIDI value is >= 63 (button press)
+                if raw_value >= 63 {
+                    ps.mixes[target.mix_index].toggle_solo(target.strip_index);
+                    ps.write_state();
+                }
             }
         }
     }
@@ -325,7 +334,10 @@ impl BatonApp {
                         egui::Sense::click_and_drag(),
                     );
                     
-                    if response.double_clicked() {
+                    if response.secondary_clicked() {
+                        // Right-click to start MIDI learn
+                        action = StripAction::StartMidiLearnPan;
+                    } else if response.double_clicked() {
                         balance = 0.0;
                         strip.balance = 0.0;
                         action = StripAction::FaderChanged;
@@ -674,18 +686,31 @@ impl BatonApp {
             ui.horizontal(|ui| {
                 // Mute button
                 let muted = strip.mute;
-                if ui
-                    .add(
-                        egui::Button::new(if muted { "M" } else { "M" })
-                            .min_size(egui::vec2(35.0, 25.0))
-                            .fill(if muted {
-                                egui::Color32::RED
-                            } else {
-                                egui::Color32::DARK_GRAY
-                            }),
+                let muted_by_solo = strip.mute_by_solo;
+                
+                // Determine button color: if muted by solo, show red text on dark gray background
+                // If manually muted, show black text on red background
+                let (button_fill, text_color) = if muted {
+                    (egui::Color32::RED, egui::Color32::BLACK)
+                } else if muted_by_solo {
+                    (egui::Color32::DARK_GRAY, egui::Color32::RED)
+                } else {
+                    (egui::Color32::DARK_GRAY, egui::Color32::LIGHT_GRAY)
+                };
+                
+                let mute_response = ui.add(
+                    egui::Button::new(
+                        egui::RichText::new("M")
+                            .color(text_color)
                     )
-                    .clicked()
-                {
+                    .min_size(egui::vec2(35.0, 25.0))
+                    .fill(button_fill),
+                );
+                
+                if mute_response.secondary_clicked() {
+                    // Right-click to start MIDI learn
+                    action = StripAction::StartMidiLearnMute;
+                } else if mute_response.clicked() {
                     strip.mute = !muted;
                     action = StripAction::FaderChanged;
                 }
@@ -693,18 +718,20 @@ impl BatonApp {
                 // Solo button (only for channel strips)
                 if matches!(strip.kind, usb::StripKind::Channel) {
                     let soloed = strip.solo;
-                    if ui
-                        .add(
-                            egui::Button::new(if soloed { "S" } else { "S" })
-                                .min_size(egui::vec2(35.0, 25.0))
-                                .fill(if soloed {
-                                    egui::Color32::YELLOW
-                                } else {
-                                    egui::Color32::DARK_GRAY
-                                }),
-                        )
-                        .clicked()
-                    {
+                    let solo_response = ui.add(
+                        egui::Button::new(if soloed { "S" } else { "S" })
+                            .min_size(egui::vec2(35.0, 25.0))
+                            .fill(if soloed {
+                                egui::Color32::YELLOW
+                            } else {
+                                egui::Color32::DARK_GRAY
+                            }),
+                    );
+                    
+                    if solo_response.secondary_clicked() {
+                        // Right-click to start MIDI learn
+                        action = StripAction::StartMidiLearnSolo;
+                    } else if solo_response.clicked() {
                         action = StripAction::SoloToggled;
                     }
                 }
@@ -903,7 +930,6 @@ impl eframe::App for BatonApp {
                                 ps.write_state();
                             }
                             StripAction::StartMidiLearnFader => {
-                                // Start MIDI learn for this fader
                                 let target = midi_control::ControlTarget::Strip(midi_control::StripTarget {
                                     mix_index: self.active_mix_index,
                                     strip_index,
@@ -911,6 +937,33 @@ impl eframe::App for BatonApp {
                                 });
                                 self.midi_learn_state = self.midi_mapping.start_learning(target);
                                 self.status_message = format!("Learning MIDI for strip {} fader - move a MIDI control...", strip_index + 1);
+                            }
+                            StripAction::StartMidiLearnPan => {
+                                let target = midi_control::ControlTarget::Strip(midi_control::StripTarget {
+                                    mix_index: self.active_mix_index,
+                                    strip_index,
+                                    control: midi_control::StripControl::Balance,
+                                });
+                                self.midi_learn_state = self.midi_mapping.start_learning(target);
+                                self.status_message = format!("Learning MIDI for strip {} pan - move a MIDI control...", strip_index + 1);
+                            }
+                            StripAction::StartMidiLearnMute => {
+                                let target = midi_control::ControlTarget::Strip(midi_control::StripTarget {
+                                    mix_index: self.active_mix_index,
+                                    strip_index,
+                                    control: midi_control::StripControl::Mute,
+                                });
+                                self.midi_learn_state = self.midi_mapping.start_learning(target);
+                                self.status_message = format!("Learning MIDI for strip {} mute - move a MIDI control...", strip_index + 1);
+                            }
+                            StripAction::StartMidiLearnSolo => {
+                                let target = midi_control::ControlTarget::Strip(midi_control::StripTarget {
+                                    mix_index: self.active_mix_index,
+                                    strip_index,
+                                    control: midi_control::StripControl::Solo,
+                                });
+                                self.midi_learn_state = self.midi_mapping.start_learning(target);
+                                self.status_message = format!("Learning MIDI for strip {} solo - move a MIDI control...", strip_index + 1);
                             }
                             StripAction::None => {}
                         }
