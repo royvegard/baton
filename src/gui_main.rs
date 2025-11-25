@@ -289,6 +289,62 @@ impl BatonApp {
             // Strip name
             ui.label(egui::RichText::new(name).strong());
 
+            // Balance knob at top (only for channel strips)
+            if matches!(strip.kind, usb::StripKind::Channel) {
+                ui.add_space(5.0);
+                
+                ui.vertical_centered(|ui| {
+                    let mut balance = strip.balance as f32;
+                    
+                    // Draw a knob control
+                    let knob_radius = 25.0;
+                    let (knob_rect, response) = ui.allocate_exact_size(
+                        egui::vec2(knob_radius * 2.0, knob_radius * 2.0),
+                        egui::Sense::click_and_drag(),
+                    );
+                    
+                    if response.double_clicked() {
+                        balance = 0.0;
+                        strip.balance = 0.0;
+                        action = StripAction::FaderChanged;
+                    } else if response.dragged() {
+                        let delta = response.drag_delta();
+                        // Use both horizontal and vertical drag (right = positive, down = negative)
+                        let combined_delta = delta.x - delta.y;
+                        balance = (balance + combined_delta * 0.5).clamp(-100.0, 100.0);
+                        strip.balance = balance as f64;
+                        action = StripAction::FaderChanged;
+                    }
+                    
+                    // Draw the knob
+                    let painter = ui.painter();
+                    let center = knob_rect.center();
+                    
+                    // Outer circle
+                    painter.circle_filled(center, knob_radius, egui::Color32::from_gray(60));
+                    painter.circle_stroke(center, knob_radius, egui::Stroke::new(2.0, egui::Color32::from_gray(100)));
+                    
+                    // Calculate angle from balance value (-100 to 100 -> -135° to 135°)
+                    let angle = (balance / 100.0) * 2.356; // 135 degrees in radians
+                    let indicator_length = knob_radius * 0.7;
+                    let indicator_end = egui::pos2(
+                        center.x + angle.sin() * indicator_length,
+                        center.y - angle.cos() * indicator_length,
+                    );
+                    
+                    // Indicator line
+                    painter.line_segment(
+                        [center, indicator_end],
+                        egui::Stroke::new(3.0, egui::Color32::WHITE),
+                    );
+                    
+                    // Center dot
+                    painter.circle_filled(center, 3.0, egui::Color32::from_gray(200));
+                });
+                
+                ui.add_space(5.0);
+            }
+
             // Fader value display
             ui.label(format!("{:.1} dB", strip.fader));
 
@@ -477,55 +533,6 @@ impl BatonApp {
             
             ui.add_space(10.0);
 
-            // Balance (only for channel strips)
-            if matches!(strip.kind, usb::StripKind::Channel) {
-                ui.label(format!("Pan: {:.0}", strip.balance));
-                let mut balance = strip.balance as f32;
-                
-                // Draw a knob control
-                let knob_radius = 25.0;
-                let (knob_rect, response) = ui.allocate_exact_size(
-                    egui::vec2(knob_radius * 2.0, knob_radius * 2.0),
-                    egui::Sense::click_and_drag(),
-                );
-                
-                if response.double_clicked() {
-                    balance = 0.0;
-                    strip.balance = 0.0;
-                    action = StripAction::FaderChanged;
-                } else if response.dragged() {
-                    let delta_y = response.drag_delta().y;
-                    balance = (balance - delta_y * 0.5).clamp(-100.0, 100.0);
-                    strip.balance = balance as f64;
-                    action = StripAction::FaderChanged;
-                }
-                
-                // Draw the knob
-                let painter = ui.painter();
-                let center = knob_rect.center();
-                
-                // Outer circle
-                painter.circle_filled(center, knob_radius, egui::Color32::from_gray(60));
-                painter.circle_stroke(center, knob_radius, egui::Stroke::new(2.0, egui::Color32::from_gray(100)));
-                
-                // Calculate angle from balance value (-100 to 100 -> -135° to 135°)
-                let angle = (balance / 100.0) * 2.356; // 135 degrees in radians
-                let indicator_length = knob_radius * 0.7;
-                let indicator_end = egui::pos2(
-                    center.x + angle.sin() * indicator_length,
-                    center.y - angle.cos() * indicator_length,
-                );
-                
-                // Indicator line
-                painter.line_segment(
-                    [center, indicator_end],
-                    egui::Stroke::new(3.0, egui::Color32::WHITE),
-                );
-                
-                // Center dot
-                painter.circle_filled(center, 3.0, egui::Color32::from_gray(200));
-            }
-
             // Mute and Solo buttons side by side
             ui.horizontal(|ui| {
                 // Mute button
@@ -565,6 +572,9 @@ impl BatonApp {
                     }
                 }
             });
+            
+            // Add padding at bottom to prevent scrollbar from obscuring buttons
+            ui.add_space(20.0);
         });
         
         action
