@@ -279,6 +279,7 @@ impl BatonApp {
         strip: &mut usb::Strip,
         name: &str,
         meter_value: f64,
+        meter_value_right: Option<f64>,
         available_height: f32,
     ) -> StripAction {
         let mut action = StripAction::None;
@@ -443,59 +444,69 @@ impl BatonApp {
                 egui::Color32::from_rgb(255, 200, 0),
             );
             
-            // Draw meter to the right of the labels (using same scale as fader)
+            // Draw meter(s) to the right of the labels (using same scale as fader)
             let meter_width = 12.0;
-            let meter_x = fader_rect.max.x + 25.0;
-            let meter_rect = egui::Rect::from_min_size(
-                egui::pos2(meter_x, fader_rect.min.y),
-                egui::vec2(meter_width, fader_height),
-            );
+            let meter_spacing = 2.0;
+            let meter_x_start = fader_rect.max.x + 25.0;
             
-            // Meter background
-            painter.rect_filled(meter_rect, 0.0, egui::Color32::from_gray(20));
-            
-            // Draw meter with colored segments
-            // Define color zones: (max_db, color)
-            let color_zones = [
-                (10.0, egui::Color32::RED),                          // -3 to +10 dB
-                (-3.0, egui::Color32::from_rgb(255, 165, 0)),       // -6 to -3 dB (orange)
-                (-6.0, egui::Color32::YELLOW),                       // -9 to -6 dB
-                (-9.0, egui::Color32::GREEN),                       // -18 to -9 dB
-                (-18.0, egui::Color32::from_rgb(0, 185, 0)),        // -50 to -18 dB (dark green)
-            ];
-            
-            // Draw each segment up to the meter value
-            for i in 0..color_zones.len() {
-                let (max_db, color) = color_zones[i];
-                let min_db = if i < color_zones.len() - 1 {
-                    color_zones[i + 1].0
-                } else {
-                    -50.0
-                };
+            // Helper function to draw a single meter
+            let draw_single_meter = |painter: &egui::Painter, meter_x: f32, meter_val: f64| {
+                let meter_rect = egui::Rect::from_min_size(
+                    egui::pos2(meter_x, fader_rect.min.y),
+                    egui::vec2(meter_width, fader_height),
+                );
                 
-                // Only draw if meter reaches this segment
-                if meter_value >= min_db {
-                    let segment_max = max_db.min(meter_value);
-                    let segment_min = min_db.max(-50.0);
+                // Meter background
+                painter.rect_filled(meter_rect, 0.0, egui::Color32::from_gray(20));
+                
+                // Draw meter with colored segments
+                let color_zones = [
+                    (10.0, egui::Color32::RED),
+                    (-3.0, egui::Color32::from_rgb(255, 165, 0)),
+                    (-6.0, egui::Color32::YELLOW),
+                    (-9.0, egui::Color32::GREEN),
+                    (-18.0, egui::Color32::from_rgb(0, 185, 0)),
+                ];
+                
+                // Draw each segment up to the meter value
+                for i in 0..color_zones.len() {
+                    let (max_db, color) = color_zones[i];
+                    let min_db = if i < color_zones.len() - 1 {
+                        color_zones[i + 1].0
+                    } else {
+                        -50.0
+                    };
                     
-                    if segment_max > segment_min {
-                        // Calculate positions for this segment
-                        let top_normalized = (segment_max + 50.0) / 60.0;
-                        let bottom_normalized = (segment_min + 50.0) / 60.0;
+                    if meter_val >= min_db {
+                        let segment_max = max_db.min(meter_val);
+                        let segment_min = min_db.max(-50.0);
                         
-                        let top_y = meter_rect.max.y - (top_normalized * fader_height as f64) as f32;
-                        let bottom_y = meter_rect.max.y - (bottom_normalized * fader_height as f64) as f32;
-                        let segment_height = bottom_y - top_y;
-                        
-                        if segment_height > 0.0 {
-                            let segment_rect = egui::Rect::from_min_size(
-                                egui::pos2(meter_rect.min.x, top_y),
-                                egui::vec2(meter_width, segment_height),
-                            );
-                            painter.rect_filled(segment_rect, 0.0, color);
+                        if segment_max > segment_min {
+                            let top_normalized = (segment_max + 50.0) / 60.0;
+                            let bottom_normalized = (segment_min + 50.0) / 60.0;
+                            
+                            let top_y = meter_rect.max.y - (top_normalized * fader_height as f64) as f32;
+                            let bottom_y = meter_rect.max.y - (bottom_normalized * fader_height as f64) as f32;
+                            let segment_height = bottom_y - top_y;
+                            
+                            if segment_height > 0.0 {
+                                let segment_rect = egui::Rect::from_min_size(
+                                    egui::pos2(meter_rect.min.x, top_y),
+                                    egui::vec2(meter_width, segment_height),
+                                );
+                                painter.rect_filled(segment_rect, 0.0, color);
+                            }
                         }
                     }
                 }
+            };
+            
+            // Draw left meter (or mono meter)
+            draw_single_meter(&painter, meter_x_start, meter_value);
+            
+            // Draw right meter if stereo
+            if let Some(right_val) = meter_value_right {
+                draw_single_meter(&painter, meter_x_start + meter_width + meter_spacing, right_val);
             }
             
             // Draw fader cap
@@ -709,28 +720,31 @@ impl eframe::App for BatonApp {
                         .map(|(name, meter)| (name.clone(), meter.value))
                         .collect();
                     let bus_name = ps.mixes[self.active_mix_index].name.clone();
-                    let bus_meter = ps.bus_meters[self.active_mix_index * 2].value;
+                    // Get both left and right bus meters
+                    let bus_meter_left = ps.bus_meters[self.active_mix_index * 2].value;
+                    let bus_meter_right = ps.bus_meters[self.active_mix_index * 2 + 1].value;
                     drop(ps);
 
                     let mut ps = self.ps.lock().unwrap();
                     let mix = &mut ps.mixes[self.active_mix_index];
                     let mut strip_actions = Vec::new();
 
-                    // Draw channel strips
+                    // Draw channel strips (mono - no right meter)
                     for (i, strip) in mix.strips.channel_strips.iter_mut().enumerate() {
                         let (name, meter_value) = &strip_data[i];
-                        let action = Self::draw_strip(ui, strip, name, *meter_value, available_height);
+                        let action = Self::draw_strip(ui, strip, name, *meter_value, None, available_height);
                         strip_actions.push((i, action));
                         ui.separator();
                     }
 
-                    // Draw bus strip
+                    // Draw bus strip (stereo - with left and right meters)
                     let bus_strip = &mut mix.strips.bus_strip;
                     let bus_action = Self::draw_strip(
                         ui,
                         bus_strip,
                         &bus_name,
-                        bus_meter,
+                        bus_meter_left,
+                        Some(bus_meter_right),
                         available_height,
                     );
                     let bus_strip_index = mix.strips.channel_strips.len();
