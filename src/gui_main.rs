@@ -18,6 +18,7 @@ enum StripAction {
     None,
     FaderChanged,
     SoloToggled,
+    StartMidiLearnFader,
 }
 
 fn main() -> eframe::Result {
@@ -396,7 +397,10 @@ impl BatonApp {
                 egui::Sense::click_and_drag(),
             );
             
-            if response.double_clicked() {
+            if response.secondary_clicked() {
+                // Right-click to start MIDI learn
+                action = StripAction::StartMidiLearnFader;
+            } else if response.double_clicked() {
                 fader_value = 0.0;
                 strip.set_fader(0.0);
                 action = StripAction::FaderChanged;
@@ -408,6 +412,36 @@ impl BatonApp {
                 strip.set_fader(fader_value as f64);
                 action = StripAction::FaderChanged;
             }
+            
+            // Allocate meter rectangles and check for clicks (before getting painter)
+            let meter_width = 12.0;
+            let meter_spacing = 2.0;
+            let meter_x_start = fader_rect.max.x + 25.0;
+            
+            let left_meter_rect = egui::Rect::from_min_size(
+                egui::pos2(meter_x_start, fader_rect.min.y),
+                egui::vec2(meter_width, fader_height),
+            );
+            let left_meter_response = ui.allocate_rect(left_meter_rect, egui::Sense::click());
+            let mut meter_clicked = left_meter_response.clicked();
+            let mut meter_double_clicked = left_meter_response.double_clicked();
+            
+            let right_meter_rect = if meter_value_right.is_some() {
+                let rect = egui::Rect::from_min_size(
+                    egui::pos2(meter_x_start + meter_width + meter_spacing, fader_rect.min.y),
+                    egui::vec2(meter_width, fader_height),
+                );
+                let response = ui.allocate_rect(rect, egui::Sense::click());
+                if response.clicked() {
+                    meter_clicked = true;
+                }
+                if response.double_clicked() {
+                    meter_double_clicked = true;
+                }
+                Some(rect)
+            } else {
+                None
+            };
             
             // Draw the fader
             let painter = ui.painter();
@@ -473,15 +507,9 @@ impl BatonApp {
                 egui::Color32::from_rgb(255, 200, 0),
             );
             
-            // Draw meter(s) to the right of the labels (using same scale as fader)
-            let meter_width = 12.0;
-            let meter_spacing = 2.0;
-            let meter_x_start = fader_rect.max.x + 25.0;
-            
             // Check for clipping (meter value above -0.1 dB) and update peak holds
             let clip_threshold = -0.1;
             let now = Instant::now();
-            let clip_duration = Duration::from_secs(2);
             let peak_hold_duration = Duration::from_millis(500);
             
             // Update left/mono peak hold
@@ -512,22 +540,24 @@ impl BatonApp {
                 }
             }
             
+            // Clear clip indicators if meter was clicked or double-clicked
+            if meter_double_clicked {
+                // Double-click: clear ALL clip indicators
+                clip_indicators.clear();
+            } else if meter_clicked {
+                // Single click: clear only this strip's clip indicators
+                clip_indicators.remove(&format!("{}_L", meter_id));
+                clip_indicators.remove(&format!("{}_R", meter_id));
+            }
+            
             // Helper function to draw a single meter
-            let draw_single_meter = |painter: &egui::Painter, meter_x: f32, meter_val: f64, channel_suffix: &str| {
-                let meter_rect = egui::Rect::from_min_size(
-                    egui::pos2(meter_x, fader_rect.min.y),
-                    egui::vec2(meter_width, fader_height),
-                );
-                
+            let draw_single_meter = |painter: &egui::Painter, meter_rect: egui::Rect, meter_val: f64, channel_suffix: &str| {
                 // Meter background
                 painter.rect_filled(meter_rect, 0.0, egui::Color32::from_gray(20));
                 
                 // Check if this meter is showing a clip indicator
                 let meter_key = format!("{}_{}", meter_id, channel_suffix);
-                let is_clipping = clip_indicators
-                    .get(&meter_key)
-                    .map(|time| now.duration_since(*time) < clip_duration)
-                    .unwrap_or(false);
+                let is_clipping = clip_indicators.contains_key(&meter_key);
                 
                 // Draw meter with colored segments
                 let color_zones = [
@@ -596,11 +626,13 @@ impl BatonApp {
             };
             
             // Draw left meter (or mono meter)
-            draw_single_meter(&painter, meter_x_start, meter_value, "L");
+            draw_single_meter(&painter, left_meter_rect, meter_value, "L");
             
             // Draw right meter if stereo
             if let Some(right_val) = meter_value_right {
-                draw_single_meter(&painter, meter_x_start + meter_width + meter_spacing, right_val, "R");
+                if let Some(right_rect) = right_meter_rect {
+                    draw_single_meter(&painter, right_rect, right_val, "R");
+                }
             }
             
             // Draw fader cap
@@ -869,6 +901,16 @@ impl eframe::App for BatonApp {
                             StripAction::SoloToggled => {
                                 ps.mixes[self.active_mix_index].toggle_solo(strip_index);
                                 ps.write_state();
+                            }
+                            StripAction::StartMidiLearnFader => {
+                                // Start MIDI learn for this fader
+                                let target = midi_control::ControlTarget::Strip(midi_control::StripTarget {
+                                    mix_index: self.active_mix_index,
+                                    strip_index,
+                                    control: midi_control::StripControl::Fader,
+                                });
+                                self.midi_learn_state = self.midi_mapping.start_learning(target);
+                                self.status_message = format!("Learning MIDI for strip {} fader - move a MIDI control...", strip_index + 1);
                             }
                             StripAction::None => {}
                         }

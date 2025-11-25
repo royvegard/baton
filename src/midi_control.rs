@@ -262,7 +262,7 @@ impl MidiMapping {
             StripControl::Fader => Some(ValueRange {
                 midi_min: 0,
                 midi_max: 127,
-                target_min: -96.0,
+                target_min: -50.0,
                 target_max: 10.0,
                 curve: Curve::Linear,
             }),
