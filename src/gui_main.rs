@@ -289,15 +289,21 @@ impl BatonApp {
             // Strip name
             ui.label(egui::RichText::new(name).strong());
 
-            // Display labels in horizontal layout
+            // Display labels in horizontal layout with fixed widths
             ui.horizontal(|ui| {
-                // Fader value display
-                ui.label(format!("{:.1} dB", strip.fader));
+                // Fader value display (fixed width)
+                ui.add_sized(
+                    egui::vec2(50.0, 20.0),
+                    egui::Label::new(format!("{:.1} dB", strip.fader))
+                );
                 
                 ui.add_space(5.0);
                 
-                // Meter value display
-                ui.label(format!("{:.1} dB", meter_value));
+                // Meter value display (fixed width)
+                ui.add_sized(
+                    egui::vec2(50.0, 20.0),
+                    egui::Label::new(format!("{:.1} dB", meter_value))
+                );
             });
 
             // Custom Fader
@@ -401,7 +407,7 @@ impl BatonApp {
             );
             
             // Meter background
-            painter.rect_filled(meter_rect, 2.0, egui::Color32::from_gray(20));
+            painter.rect_filled(meter_rect, 0.0, egui::Color32::from_gray(20));
             
             // Draw meter with colored segments
             // Define color zones: (max_db, color)
