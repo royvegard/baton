@@ -2,6 +2,7 @@
 use eframe::egui;
 use flexi_logger::{detailed_format, FileSpec};
 use std::{
+    collections::HashMap,
     env,
     fs::File,
     io::{Read, Write},
@@ -55,6 +56,7 @@ struct BatonApp {
     tick_rate: Duration,
     bypass: bool,
     status_message: String,
+    clip_indicators: HashMap<String, Instant>, // Track clip times by meter ID
 }
 
 impl BatonApp {
@@ -112,9 +114,10 @@ impl BatonApp {
             active_mix_index: 0,
             active_strip_index: 0,
             last_tick: Instant::now(),
-            tick_rate: Duration::from_millis(25),
+            tick_rate: Duration::from_millis(20),
             bypass: false,
             status_message: String::new(),
+            clip_indicators: HashMap::new(),
         }
     }
 
@@ -281,6 +284,8 @@ impl BatonApp {
         meter_value: f64,
         meter_value_right: Option<f64>,
         available_height: f32,
+        clip_indicators: &mut HashMap<String, Instant>,
+        meter_id: &str,
     ) -> StripAction {
         let mut action = StripAction::None;
         
@@ -470,8 +475,22 @@ impl BatonApp {
             let meter_spacing = 2.0;
             let meter_x_start = fader_rect.max.x + 25.0;
             
+            // Check for clipping (meter value above -0.1 dB)
+            let clip_threshold = -0.1;
+            let now = Instant::now();
+            let clip_duration = Duration::from_secs(2);
+            
+            if meter_value > clip_threshold {
+                clip_indicators.insert(format!("{}_L", meter_id), now);
+            }
+            if let Some(right_val) = meter_value_right {
+                if right_val > clip_threshold {
+                    clip_indicators.insert(format!("{}_R", meter_id), now);
+                }
+            }
+            
             // Helper function to draw a single meter
-            let draw_single_meter = |painter: &egui::Painter, meter_x: f32, meter_val: f64| {
+            let draw_single_meter = |painter: &egui::Painter, meter_x: f32, meter_val: f64, channel_suffix: &str| {
                 let meter_rect = egui::Rect::from_min_size(
                     egui::pos2(meter_x, fader_rect.min.y),
                     egui::vec2(meter_width, fader_height),
@@ -479,6 +498,13 @@ impl BatonApp {
                 
                 // Meter background
                 painter.rect_filled(meter_rect, 0.0, egui::Color32::from_gray(20));
+                
+                // Check if this meter is showing a clip indicator
+                let meter_key = format!("{}_{}", meter_id, channel_suffix);
+                let is_clipping = clip_indicators
+                    .get(&meter_key)
+                    .map(|time| now.duration_since(*time) < clip_duration)
+                    .unwrap_or(false);
                 
                 // Draw meter with colored segments
                 let color_zones = [
@@ -520,14 +546,24 @@ impl BatonApp {
                         }
                     }
                 }
+                
+                // Draw clip indicator at the top if clipping
+                if is_clipping {
+                    let clip_indicator_height = 8.0;
+                    let clip_rect = egui::Rect::from_min_size(
+                        egui::pos2(meter_rect.min.x, meter_rect.min.y),
+                        egui::vec2(meter_width, clip_indicator_height),
+                    );
+                    painter.rect_filled(clip_rect, 0.0, egui::Color32::from_rgb(255, 0, 0));
+                }
             };
             
             // Draw left meter (or mono meter)
-            draw_single_meter(&painter, meter_x_start, meter_value);
+            draw_single_meter(&painter, meter_x_start, meter_value, "L");
             
             // Draw right meter if stereo
             if let Some(right_val) = meter_value_right {
-                draw_single_meter(&painter, meter_x_start + meter_width + meter_spacing, right_val);
+                draw_single_meter(&painter, meter_x_start + meter_width + meter_spacing, right_val, "R");
             }
             
             // Draw fader cap
@@ -754,13 +790,24 @@ impl eframe::App for BatonApp {
                     // Draw channel strips (mono - no right meter)
                     for (i, strip) in mix.strips.channel_strips.iter_mut().enumerate() {
                         let (name, meter_value) = &strip_data[i];
-                        let action = Self::draw_strip(ui, strip, name, *meter_value, None, available_height);
+                        let meter_id = format!("ch_{}", i);
+                        let action = Self::draw_strip(
+                            ui, 
+                            strip, 
+                            name, 
+                            *meter_value, 
+                            None, 
+                            available_height, 
+                            &mut self.clip_indicators,
+                            &meter_id,
+                        );
                         strip_actions.push((i, action));
                         ui.separator();
                     }
 
                     // Draw bus strip (stereo - with left and right meters)
                     let bus_strip = &mut mix.strips.bus_strip;
+                    let meter_id = format!("bus_{}", self.active_mix_index);
                     let bus_action = Self::draw_strip(
                         ui,
                         bus_strip,
@@ -768,6 +815,8 @@ impl eframe::App for BatonApp {
                         bus_meter_left,
                         Some(bus_meter_right),
                         available_height,
+                        &mut self.clip_indicators,
+                        &meter_id,
                     );
                     let bus_strip_index = mix.strips.channel_strips.len();
                     strip_actions.push((bus_strip_index, bus_action));
