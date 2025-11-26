@@ -419,7 +419,10 @@ impl BatonApp {
             } else if response.dragged() {
                 let delta_y = response.drag_delta().y;
                 // Convert pixel delta to dB range (-50 to +10)
-                let db_per_pixel = 60.0 / fader_height;
+                // When Shift is pressed, increase sensitivity by 10x for fine control
+                let shift_pressed = ui.input(|i| i.modifiers.shift);
+                let sensitivity = if shift_pressed { 10.0 } else { 1.0 };
+                let db_per_pixel = (60.0 / fader_height) / sensitivity;
                 fader_value = (fader_value - delta_y * db_per_pixel).clamp(-50.0, 10.0);
                 strip.set_fader(fader_value as f64);
                 action = StripAction::FaderChanged;
