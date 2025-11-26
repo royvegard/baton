@@ -539,9 +539,7 @@ impl BatonApp {
             let left_key = format!("{}_L", meter_id);
             let left_peak_entry = peak_holds.entry(left_key.clone()).or_insert((-50.0, now));
             // Reset if expired, otherwise update if new value is higher
-            if now.duration_since(left_peak_entry.1) >= peak_hold_duration {
-                *left_peak_entry = (meter_value, now);
-            } else if meter_value > left_peak_entry.0 {
+            if now.duration_since(left_peak_entry.1) >= peak_hold_duration || meter_value > left_peak_entry.0 {
                 *left_peak_entry = (meter_value, now);
             }
             if meter_value > clip_threshold {
@@ -550,7 +548,7 @@ impl BatonApp {
             
             // Update running average for left/mono channel
             let avg_duration = Duration::from_secs(3);
-            let left_history = meter_averages.entry(left_key.clone()).or_insert_with(Vec::new);
+            let left_history = meter_averages.entry(left_key.clone()).or_default();
             left_history.push((meter_value, now));
             // Remove values older than 3 seconds
             left_history.retain(|(_, time)| now.duration_since(*time) < avg_duration);
@@ -560,9 +558,7 @@ impl BatonApp {
                 let right_key = format!("{}_R", meter_id);
                 let right_peak_entry = peak_holds.entry(right_key.clone()).or_insert((-50.0, now));
                 // Reset if expired, otherwise update if new value is higher
-                if now.duration_since(right_peak_entry.1) >= peak_hold_duration {
-                    *right_peak_entry = (right_val, now);
-                } else if right_val > right_peak_entry.0 {
+                if now.duration_since(right_peak_entry.1) >= peak_hold_duration || right_val > right_peak_entry.0 {
                     *right_peak_entry = (right_val, now);
                 }
                 if right_val > clip_threshold {
@@ -570,7 +566,7 @@ impl BatonApp {
                 }
                 
                 // Update running average for right channel
-                let right_history = meter_averages.entry(right_key.clone()).or_insert_with(Vec::new);
+                let right_history = meter_averages.entry(right_key.clone()).or_default();
                 right_history.push((right_val, now));
                 // Remove values older than 3 seconds
                 right_history.retain(|(_, time)| now.duration_since(*time) < avg_duration);
@@ -680,12 +676,12 @@ impl BatonApp {
             };
             
             // Draw left meter (or mono meter)
-            draw_single_meter(&painter, left_meter_rect, meter_value, "L");
+            draw_single_meter(painter, left_meter_rect, meter_value, "L");
             
             // Draw right meter if stereo
             if let Some(right_val) = meter_value_right {
                 if let Some(right_rect) = right_meter_rect {
-                    draw_single_meter(&painter, right_rect, right_val, "R");
+                    draw_single_meter(painter, right_rect, right_val, "R");
                 }
             }
             
