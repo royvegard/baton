@@ -23,6 +23,7 @@ enum StripAction {
     StartMidiLearnMute,
     StartMidiLearnSolo,
     NameChanged(String),
+    ColorChanged(egui::Color32),
 }
 
 fn main() -> eframe::Result {
@@ -64,6 +65,7 @@ struct BatonApp {
     clip_indicators: HashMap<String, Instant>, // Track clip times by meter ID
     peak_holds: HashMap<String, (f64, Instant)>, // Track peak values and times by meter ID
     meter_averages: HashMap<String, Vec<(f64, Instant)>>, // Track meter history for running average
+    strip_colors: HashMap<String, egui::Color32>, // Track custom colors by strip ID (mix_index:strip_index)
 }
 
 impl BatonApp {
@@ -127,6 +129,7 @@ impl BatonApp {
             clip_indicators: HashMap::new(),
             peak_holds: HashMap::new(),
             meter_averages: HashMap::new(),
+            strip_colors: HashMap::new(),
         }
     }
 
@@ -308,15 +311,16 @@ impl BatonApp {
         peak_holds: &mut HashMap<String, (f64, Instant)>,
         meter_averages: &mut HashMap<String, Vec<(f64, Instant)>>,
         meter_id: &str,
+        custom_color: Option<egui::Color32>,
     ) -> StripAction {
         let mut action = StripAction::None;
 
-        // Set background color based on strip kind
-        let bg_color = match strip.kind {
+        // Set background color - use custom color if set, otherwise default based on strip kind
+        let bg_color = custom_color.unwrap_or_else(|| match strip.kind {
             usb::StripKind::Main => egui::Color32::from_rgb(80, 80, 0), // Dark yellow
             usb::StripKind::Bus => egui::Color32::from_rgb(20, 30, 50), // Dark blue
             usb::StripKind::Channel => egui::Color32::TRANSPARENT, // No background for channels
-        };
+        });
 
         let frame = egui::Frame::none()
             .fill(bg_color)
@@ -326,7 +330,7 @@ impl BatonApp {
             ui.vertical(|ui| {
                 ui.set_width(120.0);
 
-                // Strip name (editable)
+                // Strip name (editable with right-click color picker)
                 let name_response = ui.add(
                     egui::TextEdit::singleline(name)
                         .desired_width(120.0)
@@ -335,6 +339,39 @@ impl BatonApp {
                 if name_response.changed() {
                     action = StripAction::NameChanged(name.clone());
                 }
+
+                // Right-click context menu for color picker
+                name_response.context_menu(|ui| {
+                    ui.label("Choose strip color:");
+                    ui.separator();
+
+                    let colors = [
+                        ("Green", egui::Color32::from_rgb(0x00, 0x17, 0x07)), // #001707
+                        ("Blue", egui::Color32::from_rgb(0x00, 0x05, 0x17)),  // #000517
+                        ("Magenta", egui::Color32::from_rgb(0x17, 0x00, 0x10)), // #170010
+                        ("Orange", egui::Color32::from_rgb(0x17, 0x12, 0x00)), // #171200
+                    ];
+
+                    for (label, color) in colors {
+                        if ui
+                            .add(
+                                egui::Button::new(label)
+                                    .fill(color)
+                                    .min_size(egui::vec2(100.0, 25.0)),
+                            )
+                            .clicked()
+                        {
+                            action = StripAction::ColorChanged(color);
+                            ui.close_menu();
+                        }
+                    }
+
+                    ui.separator();
+                    if ui.button("Reset to default").clicked() {
+                        action = StripAction::ColorChanged(egui::Color32::TRANSPARENT);
+                        ui.close_menu();
+                    }
+                });
 
                 // Balance knob at top (only for channel strips), or blank space for alignment
                 if matches!(strip.kind, usb::StripKind::Channel) {
@@ -1011,6 +1048,8 @@ impl eframe::App for BatonApp {
                     for (i, strip) in mix.strips.channel_strips.iter_mut().enumerate() {
                         let (mut name, meter_value) = strip_data[i].clone();
                         let meter_id = format!("ch_{}", i);
+                        let strip_id = format!("{}:{}", self.active_mix_index, i);
+                        let custom_color = self.strip_colors.get(&strip_id).copied();
                         let action = Self::draw_strip(
                             ui,
                             strip,
@@ -1022,6 +1061,7 @@ impl eframe::App for BatonApp {
                             &mut self.peak_holds,
                             &mut self.meter_averages,
                             &meter_id,
+                            custom_color,
                         );
                         strip_actions.push((i, action));
                         ui.separator();
@@ -1031,6 +1071,9 @@ impl eframe::App for BatonApp {
                     let bus_strip = &mut mix.strips.bus_strip;
                     let mut bus_name_mut = bus_name.clone();
                     let meter_id = format!("bus_{}", self.active_mix_index);
+                    let bus_strip_index = mix.strips.channel_strips.len();
+                    let strip_id = format!("{}:{}", self.active_mix_index, bus_strip_index);
+                    let custom_color = self.strip_colors.get(&strip_id).copied();
                     let bus_action = Self::draw_strip(
                         ui,
                         bus_strip,
@@ -1042,8 +1085,8 @@ impl eframe::App for BatonApp {
                         &mut self.peak_holds,
                         &mut self.meter_averages,
                         &meter_id,
+                        custom_color,
                     );
-                    let bus_strip_index = mix.strips.channel_strips.len();
                     strip_actions.push((bus_strip_index, bus_action));
 
                     // Process actions
@@ -1114,6 +1157,16 @@ impl eframe::App for BatonApp {
                                     ps.channel_names[strip_index] = new_name;
                                 } else {
                                     ps.mixes[self.active_mix_index].name = new_name;
+                                }
+                            }
+                            StripAction::ColorChanged(color) => {
+                                let strip_id = format!("{}:{}", self.active_mix_index, strip_index);
+                                if color == egui::Color32::TRANSPARENT {
+                                    // Reset to default - remove custom color
+                                    self.strip_colors.remove(&strip_id);
+                                } else {
+                                    // Set custom color
+                                    self.strip_colors.insert(strip_id, color);
                                 }
                             }
                             StripAction::None => {}
