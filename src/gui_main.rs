@@ -120,7 +120,7 @@ impl BatonApp {
             active_mix_index: 0,
             active_strip_index: 0,
             last_tick: Instant::now(),
-            tick_rate: Duration::from_millis(20),
+            tick_rate: Duration::from_millis(33),
             bypass: false,
             status_message: String::new(),
             clip_indicators: HashMap::new(),
@@ -374,9 +374,6 @@ impl BatonApp {
                         [center, indicator_end],
                         egui::Stroke::new(3.0, egui::Color32::WHITE),
                     );
-                    
-                    // Center dot
-                    painter.circle_filled(center, 3.0, egui::Color32::from_gray(200));
                 });
                 
                 ui.add_space(5.0);
@@ -473,7 +470,7 @@ impl BatonApp {
             painter.rect_filled(track_rect, 1.0, egui::Color32::from_gray(30));
             
             // Draw scale marks at 6dB intervals: +6, -6, -12, -18, -24, -30, -36, -42, -48
-            let db_marks = [6.0, -6.0, -12.0, -18.0, -24.0, -30.0, -36.0, -42.0, -48.0];
+            let db_marks = [6.0, 3.0, -3.0, -6.0, -9.0, -12.0, -18.0, -24.0, -30.0, -36.0, -42.0, -48.0];
             for &db_value in &db_marks {
                 // Calculate position for this dB value (linear scale)
                 let normalized_pos = (db_value + 50.0) / 60.0;
@@ -640,7 +637,7 @@ impl BatonApp {
                 
                 // Draw peak hold line
                 let peak_key = format!("{}_{}", meter_id, channel_suffix);
-                if let Some(&(peak_val, _)) = peak_holds.get(&peak_key) {
+                if let Some(&(peak_val, _)) = peak_holds.get(&peak_key).filter(|(val, _)| *val > -50.0 && *val < 10.0) {
                     let peak_normalized = (peak_val + 50.0) / 60.0;
                     let peak_y = meter_rect.max.y - (peak_normalized * fader_height as f64) as f32;
                     painter.line_segment(
@@ -654,9 +651,10 @@ impl BatonApp {
                 
                 // Draw running average line
                 let avg_key = format!("{}_{}", meter_id, channel_suffix);
-                if let Some(history) = meter_averages.get(&avg_key) {
-                    if !history.is_empty() {
-                        let avg_val = history.iter().map(|(val, _)| val).sum::<f64>() / history.len() as f64;
+                let history = meter_averages.get(&avg_key);
+                if let Some(history) = history.filter(|h| !h.is_empty()) {
+                    let avg_val = history.iter().map(|(val, _)| val).sum::<f64>() / history.len() as f64;
+                    if avg_val > -50.0 && avg_val < 10.0 {
                         let avg_normalized = (avg_val + 50.0) / 60.0;
                         let avg_y = meter_rect.max.y - (avg_normalized * fader_height as f64) as f32;
                         painter.line_segment(
