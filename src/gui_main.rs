@@ -331,7 +331,7 @@ impl BatonApp {
                     let mut balance = strip.balance as f32;
                     
                     // Draw a knob control
-                    let knob_radius = 25.0;
+                    let knob_radius = 15.0;
                     let (knob_rect, response) = ui.allocate_exact_size(
                         egui::vec2(knob_radius * 2.0, knob_radius * 2.0),
                         egui::Sense::click_and_drag(),
@@ -359,11 +359,11 @@ impl BatonApp {
                     
                     // Outer circle
                     painter.circle_filled(center, knob_radius, egui::Color32::from_gray(60));
-                    painter.circle_stroke(center, knob_radius, egui::Stroke::new(2.0, egui::Color32::from_gray(100)));
+                    painter.circle_stroke(center, knob_radius, egui::Stroke::new(2.0, egui::Color32::WHITE));
                     
                     // Calculate angle from balance value (-100 to 100 -> -135° to 135°)
                     let angle = (balance / 100.0) * 2.356; // 135 degrees in radians
-                    let indicator_length = knob_radius * 0.7;
+                    let indicator_length = knob_radius * 1.2;
                     let indicator_end = egui::pos2(
                         center.x + angle.sin() * indicator_length,
                         center.y - angle.cos() * indicator_length,
