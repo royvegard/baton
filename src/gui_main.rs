@@ -22,6 +22,7 @@ enum StripAction {
     StartMidiLearnPan,
     StartMidiLearnMute,
     StartMidiLearnSolo,
+    NameChanged(String),
 }
 
 fn main() -> eframe::Result {
@@ -294,7 +295,7 @@ impl BatonApp {
     fn draw_strip(
         ui: &mut egui::Ui,
         strip: &mut usb::Strip,
-        name: &str,
+        name: &mut String,
         meter_value: f64,
         meter_value_right: Option<f64>,
         available_height: f32,
@@ -318,10 +319,17 @@ impl BatonApp {
         
         frame.show(ui, |ui| {
             ui.vertical(|ui| {
-                ui.set_width(90.0);
+                ui.set_width(120.0);
 
-                // Strip name
-                ui.label(egui::RichText::new(name).strong());
+                // Strip name (editable)
+                let name_response = ui.add(
+                    egui::TextEdit::singleline(name)
+                        .desired_width(120.0)
+                        .font(egui::TextStyle::Body)
+                );
+                if name_response.changed() {
+                    action = StripAction::NameChanged(name.clone());
+                }
 
             // Balance knob at top (only for channel strips), or blank space for alignment
             if matches!(strip.kind, usb::StripKind::Channel) {
@@ -389,7 +397,7 @@ impl BatonApp {
             }
 
             // Fader value display
-            ui.label(format!("{:.1} dB", strip.fader));
+            ui.add(egui::Label::new(format!("{:.1} dB", strip.fader)).halign(egui::Align::Max));
 
             // Custom Fader
             let mut fader_value = strip.fader as f32;
@@ -971,13 +979,13 @@ impl eframe::App for BatonApp {
 
                     // Draw channel strips (mono - no right meter)
                     for (i, strip) in mix.strips.channel_strips.iter_mut().enumerate() {
-                        let (name, meter_value) = &strip_data[i];
+                        let (mut name, meter_value) = strip_data[i].clone();
                         let meter_id = format!("ch_{}", i);
                         let action = Self::draw_strip(
                             ui, 
                             strip, 
-                            name, 
-                            *meter_value, 
+                            &mut name, 
+                            meter_value, 
                             None, 
                             available_height, 
                             &mut self.clip_indicators,
@@ -991,11 +999,12 @@ impl eframe::App for BatonApp {
 
                     // Draw bus strip (stereo - with left and right meters)
                     let bus_strip = &mut mix.strips.bus_strip;
+                    let mut bus_name_mut = bus_name.clone();
                     let meter_id = format!("bus_{}", self.active_mix_index);
                     let bus_action = Self::draw_strip(
                         ui,
                         bus_strip,
-                        &bus_name,
+                        &mut bus_name_mut,
                         bus_meter_left,
                         Some(bus_meter_right),
                         available_height,
@@ -1052,6 +1061,14 @@ impl eframe::App for BatonApp {
                                 });
                                 self.midi_learn_state = self.midi_mapping.start_learning(target);
                                 self.status_message = format!("Learning MIDI for strip {} solo - move a MIDI control...", strip_index + 1);
+                            }
+                            StripAction::NameChanged(new_name) => {
+                                // Update channel name or mix name
+                                if strip_index < ps.channel_names.len() {
+                                    ps.channel_names[strip_index] = new_name;
+                                } else {
+                                    ps.mixes[self.active_mix_index].name = new_name;
+                                }
                             }
                             StripAction::None => {}
                         }
