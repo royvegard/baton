@@ -1,6 +1,6 @@
 // src/gui_main.rs
 use eframe::egui;
-use flexi_logger::{detailed_format, FileSpec};
+use flexi_logger::{FileSpec, detailed_format};
 use std::{
     collections::HashMap,
     env,
@@ -208,7 +208,12 @@ impl BatonApp {
         }
     }
 
-    fn handle_strip_control(&mut self, target: &midi_control::StripTarget, value: f64, raw_value: u8) {
+    fn handle_strip_control(
+        &mut self,
+        target: &midi_control::StripTarget,
+        value: f64,
+        raw_value: u8,
+    ) {
         let mut ps = self.ps.lock().unwrap();
         let mix = &mut ps.mixes[target.mix_index];
         let strip = mix.strips.iter_mut().nth(target.strip_index).unwrap();
@@ -305,18 +310,18 @@ impl BatonApp {
         meter_id: &str,
     ) -> StripAction {
         let mut action = StripAction::None;
-        
+
         // Set background color based on strip kind
         let bg_color = match strip.kind {
             usb::StripKind::Main => egui::Color32::from_rgb(80, 80, 0), // Dark yellow
-            usb::StripKind::Bus => egui::Color32::from_rgb(20, 30, 50),  // Dark blue
-            usb::StripKind::Channel => egui::Color32::TRANSPARENT,        // No background for channels
+            usb::StripKind::Bus => egui::Color32::from_rgb(20, 30, 50), // Dark blue
+            usb::StripKind::Channel => egui::Color32::TRANSPARENT, // No background for channels
         };
-        
+
         let frame = egui::Frame::none()
             .fill(bg_color)
             .inner_margin(egui::Margin::same(5.0));
-        
+
         frame.show(ui, |ui| {
             ui.vertical(|ui| {
                 ui.set_width(120.0);
@@ -325,469 +330,493 @@ impl BatonApp {
                 let name_response = ui.add(
                     egui::TextEdit::singleline(name)
                         .desired_width(120.0)
-                        .font(egui::TextStyle::Body)
+                        .font(egui::TextStyle::Body),
                 );
                 if name_response.changed() {
                     action = StripAction::NameChanged(name.clone());
                 }
 
-            // Balance knob at top (only for channel strips), or blank space for alignment
-            if matches!(strip.kind, usb::StripKind::Channel) {
-                ui.add_space(5.0);
-                
-                ui.vertical_centered(|ui| {
-                    let mut balance = strip.balance as f32;
-                    
-                    // Draw a knob control
-                    let knob_radius = 15.0;
-                    let (knob_rect, response) = ui.allocate_exact_size(
-                        egui::vec2(knob_radius * 2.0, knob_radius * 2.0),
-                        egui::Sense::click_and_drag(),
-                    );
-                    
-                    if response.secondary_clicked() {
-                        // Right-click to start MIDI learn
-                        action = StripAction::StartMidiLearnPan;
-                    } else if response.double_clicked() {
-                        balance = 0.0;
-                        strip.balance = 0.0;
-                        action = StripAction::FaderChanged;
-                    } else if response.dragged() {
-                        let delta = response.drag_delta();
-                        // Use both horizontal and vertical drag (right = positive, down = negative)
-                        let combined_delta = delta.x - delta.y;
-                        balance = (balance + combined_delta * 0.5).clamp(-100.0, 100.0);
-                        strip.balance = balance as f64;
-                        action = StripAction::FaderChanged;
-                    }
-                    
-                    // Draw the knob
-                    let painter = ui.painter();
-                    let center = knob_rect.center();
-                    
-                    // Outer circle
-                    painter.circle_filled(center, knob_radius, egui::Color32::from_gray(60));
-                    painter.circle_stroke(center, knob_radius, egui::Stroke::new(2.0, egui::Color32::WHITE));
-                    
-                    // Calculate angle from balance value (-100 to 100 -> -135° to 135°)
-                    let angle = (balance / 100.0) * 2.356; // 135 degrees in radians
-                    let indicator_length = knob_radius * 1.2;
-                    let indicator_end = egui::pos2(
-                        center.x + angle.sin() * indicator_length,
-                        center.y - angle.cos() * indicator_length,
-                    );
-                    
-                    // Indicator line
-                    painter.line_segment(
-                        [center, indicator_end],
-                        egui::Stroke::new(3.0, egui::Color32::WHITE),
-                    );
-                });
-                
-                ui.add_space(5.0);
-            } else {
-                // Add blank space for bus/main strips to align with channel strips
-                // Match the exact structure: spacing + vertical_centered with knob size + spacing
-                ui.add_space(5.0);
-                ui.vertical_centered(|ui| {
-                    let knob_radius = 25.0;
-                    ui.allocate_space(egui::vec2(knob_radius * 2.0, knob_radius * 2.0));
-                });
-                ui.add_space(5.0);
-            }
+                // Balance knob at top (only for channel strips), or blank space for alignment
+                if matches!(strip.kind, usb::StripKind::Channel) {
+                    ui.add_space(5.0);
 
-            // Fader value display
-            ui.add(egui::Label::new(format!("{:.1} dB", strip.fader)).halign(egui::Align::Max));
+                    ui.vertical_centered(|ui| {
+                        let mut balance = strip.balance as f32;
 
-            // Custom Fader
-            let mut fader_value = strip.fader as f32;
-            ui.add_space(10.0);
-            
-            // Calculate fader height based on available space minus fixed elements
-            // Fixed elements: name label (~20), dB labels (~20), spacing (~20), pan knob (~60), buttons (~35)
-            let fixed_height = 155.0;
-            let fader_height = (available_height - fixed_height).max(200.0);
-            let fader_width = 40.0;
-            let track_width = 6.0;
-            let cap_height = 20.0;
-            let cap_width = 30.0;
-            
-            let (fader_rect, response) = ui.allocate_exact_size(
-                egui::vec2(fader_width, fader_height),
-                egui::Sense::click_and_drag(),
-            );
-            
-            if response.secondary_clicked() {
-                // Right-click to start MIDI learn
-                action = StripAction::StartMidiLearnFader;
-            } else if response.double_clicked() {
-                fader_value = 0.0;
-                strip.set_fader(0.0);
-                action = StripAction::FaderChanged;
-            } else if response.dragged() {
-                let delta_y = response.drag_delta().y;
-                // Convert pixel delta to dB range (-50 to +10)
-                // When Shift is pressed, increase sensitivity by 10x for fine control
-                let shift_pressed = ui.input(|i| i.modifiers.shift);
-                let sensitivity = if shift_pressed { 10.0 } else { 1.0 };
-                let db_per_pixel = (60.0 / fader_height) / sensitivity;
-                fader_value = (fader_value - delta_y * db_per_pixel).clamp(-50.0, 10.0);
-                strip.set_fader(fader_value as f64);
-                action = StripAction::FaderChanged;
-            }
-            
-            // Allocate meter rectangles and check for clicks (before getting painter)
-            let meter_width = 12.0;
-            let meter_spacing = 2.0;
-            let meter_x_start = fader_rect.max.x + 25.0;
-            
-            let left_meter_rect = egui::Rect::from_min_size(
-                egui::pos2(meter_x_start, fader_rect.min.y),
-                egui::vec2(meter_width, fader_height),
-            );
-            let left_meter_response = ui.allocate_rect(left_meter_rect, egui::Sense::click());
-            let mut meter_clicked = left_meter_response.clicked();
-            let mut meter_double_clicked = left_meter_response.double_clicked();
-            
-            let right_meter_rect = if meter_value_right.is_some() {
-                let rect = egui::Rect::from_min_size(
-                    egui::pos2(meter_x_start + meter_width + meter_spacing, fader_rect.min.y),
-                    egui::vec2(meter_width, fader_height),
-                );
-                let response = ui.allocate_rect(rect, egui::Sense::click());
-                if response.clicked() {
-                    meter_clicked = true;
-                }
-                if response.double_clicked() {
-                    meter_double_clicked = true;
-                }
-                Some(rect)
-            } else {
-                None
-            };
-            
-            // Draw the fader
-            let painter = ui.painter();
-            
-            // Calculate cap position (0dB is at 5/6 height, linear scale from -50 to +10)
-            let normalized_pos = (fader_value + 50.0) / 60.0;
-            let cap_y = fader_rect.max.y - (normalized_pos * fader_height);
-            
-            // Draw track background
-            let track_rect = egui::Rect::from_center_size(
-                egui::pos2(fader_rect.center().x, fader_rect.center().y),
-                egui::vec2(track_width, fader_height),
-            );
-            painter.rect_filled(track_rect, 1.0, egui::Color32::from_gray(30));
-            
-            // Draw scale marks at 6dB intervals: +6, -6, -12, -18, -24, -30, -36, -42, -48
-            let db_marks = [6.0, 3.0, -3.0, -6.0, -9.0, -12.0, -18.0, -24.0, -30.0, -36.0, -42.0, -48.0];
-            for &db_value in &db_marks {
-                // Calculate position for this dB value (linear scale)
-                let normalized_pos = (db_value + 50.0) / 60.0;
-                let mark_y = fader_rect.max.y - (normalized_pos * fader_height);
-                
-                painter.line_segment(
-                    [
-                        egui::pos2(fader_rect.min.x, mark_y),
-                        egui::pos2(fader_rect.max.x, mark_y),
-                    ],
-                    egui::Stroke::new(1.0, egui::Color32::from_gray(100)),
-                );
-                
-                // Draw dB label to the right of the tick mark
-                let label_text = if db_value > 0.0 {
-                    format!("+{:.0}", db_value)
-                } else {
-                    format!("{:.0}", db_value)
-                };
-                painter.text(
-                    egui::pos2(fader_rect.max.x + 18.0, mark_y),
-                    egui::Align2::RIGHT_CENTER,
-                    label_text,
-                    egui::FontId::proportional(9.0),
-                    egui::Color32::from_gray(150),
-                );
-            }
-            
-            // Draw 0dB marker line in yellow
-            let zero_db_normalized = (0.0 + 50.0) / 60.0;
-            let zero_db_y = fader_rect.max.y - (zero_db_normalized * fader_height);
-            painter.line_segment(
-                [
-                    egui::pos2(fader_rect.min.x, zero_db_y),
-                    egui::pos2(fader_rect.max.x, zero_db_y),
-                ],
-                egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 200, 0)),
-            );
-            
-            // Draw 0dB label
-            painter.text(
-                egui::pos2(fader_rect.max.x + 18.0, zero_db_y),
-                egui::Align2::RIGHT_CENTER,
-                "0",
-                egui::FontId::proportional(9.0),
-                egui::Color32::from_rgb(255, 200, 0),
-            );
-            
-            // Check for clipping (meter value above -0.1 dB) and update peak holds
-            let clip_threshold = -0.1;
-            let now = Instant::now();
-            let peak_hold_duration = Duration::from_millis(500);
-            
-            // Update left/mono peak hold
-            let left_key = format!("{}_L", meter_id);
-            let left_peak_entry = peak_holds.entry(left_key.clone()).or_insert((-50.0, now));
-            // Reset if expired, otherwise update if new value is higher
-            if now.duration_since(left_peak_entry.1) >= peak_hold_duration || meter_value > left_peak_entry.0 {
-                *left_peak_entry = (meter_value, now);
-            }
-            if meter_value > clip_threshold {
-                clip_indicators.insert(left_key.clone(), now);
-            }
-            
-            // Update running average for left/mono channel
-            let avg_duration = Duration::from_secs(3);
-            let left_history = meter_averages.entry(left_key.clone()).or_default();
-            left_history.push((meter_value, now));
-            // Remove values older than 3 seconds
-            left_history.retain(|(_, time)| now.duration_since(*time) < avg_duration);
-            
-            // Update right peak hold if stereo
-            if let Some(right_val) = meter_value_right {
-                let right_key = format!("{}_R", meter_id);
-                let right_peak_entry = peak_holds.entry(right_key.clone()).or_insert((-50.0, now));
-                // Reset if expired, otherwise update if new value is higher
-                if now.duration_since(right_peak_entry.1) >= peak_hold_duration || right_val > right_peak_entry.0 {
-                    *right_peak_entry = (right_val, now);
-                }
-                if right_val > clip_threshold {
-                    clip_indicators.insert(right_key.clone(), now);
-                }
-                
-                // Update running average for right channel
-                let right_history = meter_averages.entry(right_key.clone()).or_default();
-                right_history.push((right_val, now));
-                // Remove values older than 3 seconds
-                right_history.retain(|(_, time)| now.duration_since(*time) < avg_duration);
-            }
-            
-            // Clear clip indicators if meter was clicked or double-clicked
-            if meter_double_clicked {
-                // Double-click: clear ALL clip indicators
-                clip_indicators.clear();
-            } else if meter_clicked {
-                // Single click: clear only this strip's clip indicators
-                clip_indicators.remove(&format!("{}_L", meter_id));
-                clip_indicators.remove(&format!("{}_R", meter_id));
-            }
-            
-            // Helper function to draw a single meter
-            let draw_single_meter = |painter: &egui::Painter, meter_rect: egui::Rect, meter_val: f64, channel_suffix: &str| {
-                // Meter background
-                painter.rect_filled(meter_rect, 0.0, egui::Color32::from_gray(20));
-                
-                // Check if this meter is showing a clip indicator
-                let meter_key = format!("{}_{}", meter_id, channel_suffix);
-                let is_clipping = clip_indicators.contains_key(&meter_key);
-                
-                // Draw meter with colored segments
-                let color_zones = [
-                    (10.0, egui::Color32::RED),
-                    (-3.0, egui::Color32::from_rgb(255, 165, 0)),
-                    (-6.0, egui::Color32::YELLOW),
-                    (-9.0, egui::Color32::GREEN),
-                    (-18.0, egui::Color32::from_rgb(0, 185, 0)),
-                ];
-                
-                // Draw each segment up to the meter value
-                for i in 0..color_zones.len() {
-                    let (max_db, color) = color_zones[i];
-                    let min_db = if i < color_zones.len() - 1 {
-                        color_zones[i + 1].0
-                    } else {
-                        -50.0
-                    };
-                    
-                    if meter_val >= min_db {
-                        let segment_max = max_db.min(meter_val);
-                        let segment_min = min_db.max(-50.0);
-                        
-                        if segment_max > segment_min {
-                            let top_normalized = (segment_max + 50.0) / 60.0;
-                            let bottom_normalized = (segment_min + 50.0) / 60.0;
-                            
-                            let top_y = meter_rect.max.y - (top_normalized * fader_height as f64) as f32;
-                            let bottom_y = meter_rect.max.y - (bottom_normalized * fader_height as f64) as f32;
-                            let segment_height = bottom_y - top_y;
-                            
-                            if segment_height > 0.0 {
-                                let segment_rect = egui::Rect::from_min_size(
-                                    egui::pos2(meter_rect.min.x, top_y),
-                                    egui::vec2(meter_width, segment_height),
-                                );
-                                painter.rect_filled(segment_rect, 0.0, color);
-                            }
-                        }
-                    }
-                }
-                
-                // Draw clip indicator at the top if clipping
-                if is_clipping {
-                    let clip_indicator_height = 8.0;
-                    let clip_rect = egui::Rect::from_min_size(
-                        egui::pos2(meter_rect.min.x, meter_rect.min.y),
-                        egui::vec2(meter_width, clip_indicator_height),
-                    );
-                    painter.rect_filled(clip_rect, 0.0, egui::Color32::from_rgb(255, 0, 0));
-                }
-                
-                // Draw peak hold line
-                let peak_key = format!("{}_{}", meter_id, channel_suffix);
-                if let Some(&(peak_val, _)) = peak_holds.get(&peak_key).filter(|(val, _)| *val > -50.0 && *val < 10.0) {
-                    let peak_normalized = (peak_val + 50.0) / 60.0;
-                    let peak_y = meter_rect.max.y - (peak_normalized * fader_height as f64) as f32;
-                    painter.line_segment(
-                        [
-                            egui::pos2(meter_rect.min.x, peak_y),
-                            egui::pos2(meter_rect.max.x, peak_y),
-                        ],
-                        egui::Stroke::new(2.0, egui::Color32::WHITE),
-                    );
-                }
-                
-                // Draw running average line
-                let avg_key = format!("{}_{}", meter_id, channel_suffix);
-                let history = meter_averages.get(&avg_key);
-                if let Some(history) = history.filter(|h| !h.is_empty()) {
-                    let avg_val = history.iter().map(|(val, _)| val).sum::<f64>() / history.len() as f64;
-                    if avg_val > -50.0 && avg_val < 10.0 {
-                        let avg_normalized = (avg_val + 50.0) / 60.0;
-                        let avg_y = meter_rect.max.y - (avg_normalized * fader_height as f64) as f32;
-                        painter.line_segment(
-                            [
-                                egui::pos2(meter_rect.min.x, avg_y),
-                                egui::pos2(meter_rect.max.x, avg_y),
-                            ],
-                            egui::Stroke::new(4.0, egui::Color32::from_rgb(79, 0, 255)),
+                        // Draw a knob control
+                        let knob_radius = 15.0;
+                        let (knob_rect, response) = ui.allocate_exact_size(
+                            egui::vec2(knob_radius * 2.0, knob_radius * 2.0),
+                            egui::Sense::click_and_drag(),
                         );
-                    }
-                }
-            };
-            
-            // Draw left meter (or mono meter)
-            draw_single_meter(painter, left_meter_rect, meter_value, "L");
-            
-            // Draw right meter if stereo
-            if let Some(right_val) = meter_value_right {
-                if let Some(right_rect) = right_meter_rect {
-                    draw_single_meter(painter, right_rect, right_val, "R");
-                }
-            }
-            
-            // Draw fader cap
-            let cap_rect = egui::Rect::from_center_size(
-                egui::pos2(fader_rect.center().x, cap_y),
-                egui::vec2(cap_width, cap_height),
-            );
-            
-            // Cap shadow
-            painter.rect_filled(
-                cap_rect.translate(egui::vec2(1.0, 2.0)),
-                3.0,
-                egui::Color32::from_black_alpha(100),
-            );
-            
-            // Cap gradient effect
-            painter.rect_filled(cap_rect, 3.0, egui::Color32::from_gray(180));
-            painter.rect_stroke(cap_rect, 3.0, egui::Stroke::new(1.0, egui::Color32::from_gray(220)));
-            
-            // Cap highlight
-            let highlight_rect = egui::Rect::from_min_size(
-                cap_rect.min,
-                egui::vec2(cap_width, cap_height / 3.0),
-            );
-            painter.rect_filled(highlight_rect, 3.0, egui::Color32::from_gray(220));
-            
-            // Center grip line
-            painter.line_segment(
-                [
-                    egui::pos2(cap_rect.center().x - 8.0, cap_y),
-                    egui::pos2(cap_rect.center().x + 8.0, cap_y),
-                ],
-                egui::Stroke::new(2.0, egui::Color32::from_gray(100)),
-            );
-            
-            ui.add_space(10.0);
 
-            // Mute and Solo buttons side by side
-            ui.horizontal(|ui| {
-                // Mute button
-                let muted = strip.mute;
-                let muted_by_solo = strip.mute_by_solo;
-                
-                // Determine button color: if muted by solo, show red text on dark gray background
-                // If manually muted, show black text on red background
-                let (button_fill, text_color) = if muted {
-                    (egui::Color32::RED, egui::Color32::BLACK)
-                } else if muted_by_solo {
-                    (egui::Color32::from_rgb(40, 0, 0), egui::Color32::RED)
+                        if response.secondary_clicked() {
+                            // Right-click to start MIDI learn
+                            action = StripAction::StartMidiLearnPan;
+                        } else if response.double_clicked() {
+                            balance = 0.0;
+                            strip.balance = 0.0;
+                            action = StripAction::FaderChanged;
+                        } else if response.dragged() {
+                            let delta = response.drag_delta();
+                            // Use both horizontal and vertical drag (right = positive, down = negative)
+                            let combined_delta = delta.x - delta.y;
+                            balance = (balance + combined_delta * 0.5).clamp(-100.0, 100.0);
+                            strip.balance = balance as f64;
+                            action = StripAction::FaderChanged;
+                        }
+
+                        // Draw the knob
+                        let painter = ui.painter();
+                        let center = knob_rect.center();
+
+                        // Outer circle
+                        painter.circle_filled(center, knob_radius, egui::Color32::from_gray(60));
+                        painter.circle_stroke(
+                            center,
+                            knob_radius,
+                            egui::Stroke::new(2.0, egui::Color32::WHITE),
+                        );
+
+                        // Calculate angle from balance value (-100 to 100 -> -135° to 135°)
+                        let angle = (balance / 100.0) * 2.356; // 135 degrees in radians
+                        let indicator_length = knob_radius * 1.2;
+                        let indicator_end = egui::pos2(
+                            center.x + angle.sin() * indicator_length,
+                            center.y - angle.cos() * indicator_length,
+                        );
+
+                        // Indicator line
+                        painter.line_segment(
+                            [center, indicator_end],
+                            egui::Stroke::new(3.0, egui::Color32::WHITE),
+                        );
+                    });
+
+                    ui.add_space(5.0);
                 } else {
-                    (egui::Color32::from_rgb(40, 0, 0), egui::Color32::LIGHT_GRAY)
-                };
-                
-                let mute_response = ui.add(
-                    egui::Button::new(
-                        egui::RichText::new("M")
-                            .color(text_color)
-                    )
-                    .min_size(egui::vec2(35.0, 25.0))
-                    .fill(button_fill),
+                    // Add blank space for bus/main strips to align with channel strips
+                    // Match the exact structure: spacing + vertical_centered with knob size + spacing
+                    ui.add_space(5.0);
+                    ui.vertical_centered(|ui| {
+                        let knob_radius = 25.0;
+                        ui.allocate_space(egui::vec2(knob_radius * 2.0, knob_radius * 2.0));
+                    });
+                    ui.add_space(5.0);
+                }
+
+                // Fader value display
+                ui.add(egui::Label::new(format!("{:.1} dB", strip.fader)).halign(egui::Align::Max));
+
+                // Custom Fader
+                let mut fader_value = strip.fader as f32;
+                ui.add_space(10.0);
+
+                // Calculate fader height based on available space minus fixed elements
+                // Fixed elements: name label (~20), dB labels (~20), spacing (~20), pan knob (~60), buttons (~35)
+                let fixed_height = 155.0;
+                let fader_height = (available_height - fixed_height).max(200.0);
+                let fader_width = 40.0;
+                let track_width = 6.0;
+                let cap_height = 20.0;
+                let cap_width = 30.0;
+
+                let (fader_rect, response) = ui.allocate_exact_size(
+                    egui::vec2(fader_width, fader_height),
+                    egui::Sense::click_and_drag(),
                 );
-                
-                if mute_response.secondary_clicked() {
+
+                if response.secondary_clicked() {
                     // Right-click to start MIDI learn
-                    action = StripAction::StartMidiLearnMute;
-                } else if mute_response.clicked() {
-                    strip.mute = !muted;
+                    action = StripAction::StartMidiLearnFader;
+                } else if response.double_clicked() {
+                    fader_value = 0.0;
+                    strip.set_fader(0.0);
+                    action = StripAction::FaderChanged;
+                } else if response.dragged() {
+                    let delta_y = response.drag_delta().y;
+                    // Convert pixel delta to dB range (-50 to +10)
+                    // When Shift is pressed, increase sensitivity by 10x for fine control
+                    let shift_pressed = ui.input(|i| i.modifiers.shift);
+                    let sensitivity = if shift_pressed { 10.0 } else { 1.0 };
+                    let db_per_pixel = (60.0 / fader_height) / sensitivity;
+                    fader_value = (fader_value - delta_y * db_per_pixel).clamp(-50.0, 10.0);
+                    strip.set_fader(fader_value as f64);
                     action = StripAction::FaderChanged;
                 }
 
-                // Solo button (only for channel strips)
-                if matches!(strip.kind, usb::StripKind::Channel) {
-                    let soloed = strip.solo;
-                    let text_color = if soloed {
-                        egui::Color32::BLACK
-                    } else {
-                        egui::Color32::LIGHT_GRAY
-                    };
-                    let solo_response = ui.add(
-                        egui::Button::new(
-                            egui::RichText::new("S")
-                                .color(text_color)
-                        )
-                        .min_size(egui::vec2(35.0, 25.0))
-                        .fill(if soloed {
-                            egui::Color32::YELLOW
-                        } else {
-                            egui::Color32::from_rgb(40, 40, 0)
-                        }),
+                // Allocate meter rectangles and check for clicks (before getting painter)
+                let meter_width = 12.0;
+                let meter_spacing = 2.0;
+                let meter_x_start = fader_rect.max.x + 25.0;
+
+                let left_meter_rect = egui::Rect::from_min_size(
+                    egui::pos2(meter_x_start, fader_rect.min.y),
+                    egui::vec2(meter_width, fader_height),
+                );
+                let left_meter_response = ui.allocate_rect(left_meter_rect, egui::Sense::click());
+                let mut meter_clicked = left_meter_response.clicked();
+                let mut meter_double_clicked = left_meter_response.double_clicked();
+
+                let right_meter_rect = if meter_value_right.is_some() {
+                    let rect = egui::Rect::from_min_size(
+                        egui::pos2(
+                            meter_x_start + meter_width + meter_spacing,
+                            fader_rect.min.y,
+                        ),
+                        egui::vec2(meter_width, fader_height),
                     );
-                    
-                    if solo_response.secondary_clicked() {
-                        // Right-click to start MIDI learn
-                        action = StripAction::StartMidiLearnSolo;
-                    } else if solo_response.clicked() {
-                        action = StripAction::SoloToggled;
+                    let response = ui.allocate_rect(rect, egui::Sense::click());
+                    if response.clicked() {
+                        meter_clicked = true;
+                    }
+                    if response.double_clicked() {
+                        meter_double_clicked = true;
+                    }
+                    Some(rect)
+                } else {
+                    None
+                };
+
+                // Draw the fader
+                let painter = ui.painter();
+
+                // Calculate cap position (0dB is at 5/6 height, linear scale from -50 to +10)
+                let normalized_pos = (fader_value + 50.0) / 60.0;
+                let cap_y = fader_rect.max.y - (normalized_pos * fader_height);
+
+                // Draw track background
+                let track_rect = egui::Rect::from_center_size(
+                    egui::pos2(fader_rect.center().x, fader_rect.center().y),
+                    egui::vec2(track_width, fader_height),
+                );
+                painter.rect_filled(track_rect, 1.0, egui::Color32::from_gray(30));
+
+                // Draw scale marks at 6dB intervals: +6, -6, -12, -18, -24, -30, -36, -42, -48
+                let db_marks = [
+                    6.0, 3.0, -3.0, -6.0, -9.0, -12.0, -18.0, -24.0, -30.0, -36.0, -42.0, -48.0,
+                ];
+                for &db_value in &db_marks {
+                    // Calculate position for this dB value (linear scale)
+                    let normalized_pos = (db_value + 50.0) / 60.0;
+                    let mark_y = fader_rect.max.y - (normalized_pos * fader_height);
+
+                    painter.line_segment(
+                        [
+                            egui::pos2(fader_rect.min.x, mark_y),
+                            egui::pos2(fader_rect.max.x, mark_y),
+                        ],
+                        egui::Stroke::new(1.0, egui::Color32::from_gray(100)),
+                    );
+
+                    // Draw dB label to the right of the tick mark
+                    let label_text = if db_value > 0.0 {
+                        format!("+{:.0}", db_value)
+                    } else {
+                        format!("{:.0}", db_value)
+                    };
+                    painter.text(
+                        egui::pos2(fader_rect.max.x + 18.0, mark_y),
+                        egui::Align2::RIGHT_CENTER,
+                        label_text,
+                        egui::FontId::proportional(9.0),
+                        egui::Color32::from_gray(150),
+                    );
+                }
+
+                // Draw 0dB marker line in yellow
+                let zero_db_normalized = (0.0 + 50.0) / 60.0;
+                let zero_db_y = fader_rect.max.y - (zero_db_normalized * fader_height);
+                painter.line_segment(
+                    [
+                        egui::pos2(fader_rect.min.x, zero_db_y),
+                        egui::pos2(fader_rect.max.x, zero_db_y),
+                    ],
+                    egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 200, 0)),
+                );
+
+                // Draw 0dB label
+                painter.text(
+                    egui::pos2(fader_rect.max.x + 18.0, zero_db_y),
+                    egui::Align2::RIGHT_CENTER,
+                    "0",
+                    egui::FontId::proportional(9.0),
+                    egui::Color32::from_rgb(255, 200, 0),
+                );
+
+                // Check for clipping (meter value above -0.1 dB) and update peak holds
+                let clip_threshold = -0.1;
+                let now = Instant::now();
+                let peak_hold_duration = Duration::from_millis(500);
+
+                // Update left/mono peak hold
+                let left_key = format!("{}_L", meter_id);
+                let left_peak_entry = peak_holds.entry(left_key.clone()).or_insert((-50.0, now));
+                // Reset if expired, otherwise update if new value is higher
+                if now.duration_since(left_peak_entry.1) >= peak_hold_duration
+                    || meter_value > left_peak_entry.0
+                {
+                    *left_peak_entry = (meter_value, now);
+                }
+                if meter_value > clip_threshold {
+                    clip_indicators.insert(left_key.clone(), now);
+                }
+
+                // Update running average for left/mono channel
+                let avg_duration = Duration::from_secs(3);
+                let left_history = meter_averages.entry(left_key.clone()).or_default();
+                left_history.push((meter_value, now));
+                // Remove values older than 3 seconds
+                left_history.retain(|(_, time)| now.duration_since(*time) < avg_duration);
+
+                // Update right peak hold if stereo
+                if let Some(right_val) = meter_value_right {
+                    let right_key = format!("{}_R", meter_id);
+                    let right_peak_entry =
+                        peak_holds.entry(right_key.clone()).or_insert((-50.0, now));
+                    // Reset if expired, otherwise update if new value is higher
+                    if now.duration_since(right_peak_entry.1) >= peak_hold_duration
+                        || right_val > right_peak_entry.0
+                    {
+                        *right_peak_entry = (right_val, now);
+                    }
+                    if right_val > clip_threshold {
+                        clip_indicators.insert(right_key.clone(), now);
+                    }
+
+                    // Update running average for right channel
+                    let right_history = meter_averages.entry(right_key.clone()).or_default();
+                    right_history.push((right_val, now));
+                    // Remove values older than 3 seconds
+                    right_history.retain(|(_, time)| now.duration_since(*time) < avg_duration);
+                }
+
+                // Clear clip indicators if meter was clicked or double-clicked
+                if meter_double_clicked {
+                    // Double-click: clear ALL clip indicators
+                    clip_indicators.clear();
+                } else if meter_clicked {
+                    // Single click: clear only this strip's clip indicators
+                    clip_indicators.remove(&format!("{}_L", meter_id));
+                    clip_indicators.remove(&format!("{}_R", meter_id));
+                }
+
+                // Helper function to draw a single meter
+                let draw_single_meter =
+                    |painter: &egui::Painter,
+                     meter_rect: egui::Rect,
+                     meter_val: f64,
+                     channel_suffix: &str| {
+                        // Meter background
+                        painter.rect_filled(meter_rect, 0.0, egui::Color32::from_gray(20));
+
+                        // Check if this meter is showing a clip indicator
+                        let meter_key = format!("{}_{}", meter_id, channel_suffix);
+                        let is_clipping = clip_indicators.contains_key(&meter_key);
+
+                        // Draw meter with colored segments
+                        let color_zones = [
+                            (10.0, egui::Color32::RED),
+                            (-3.0, egui::Color32::from_rgb(255, 165, 0)),
+                            (-6.0, egui::Color32::YELLOW),
+                            (-9.0, egui::Color32::GREEN),
+                            (-18.0, egui::Color32::from_rgb(0, 185, 0)),
+                        ];
+
+                        // Draw each segment up to the meter value
+                        for i in 0..color_zones.len() {
+                            let (max_db, color) = color_zones[i];
+                            let min_db = if i < color_zones.len() - 1 {
+                                color_zones[i + 1].0
+                            } else {
+                                -50.0
+                            };
+
+                            if meter_val >= min_db {
+                                let segment_max = max_db.min(meter_val);
+                                let segment_min = min_db.max(-50.0);
+
+                                if segment_max > segment_min {
+                                    let top_normalized = (segment_max + 50.0) / 60.0;
+                                    let bottom_normalized = (segment_min + 50.0) / 60.0;
+
+                                    let top_y = meter_rect.max.y
+                                        - (top_normalized * fader_height as f64) as f32;
+                                    let bottom_y = meter_rect.max.y
+                                        - (bottom_normalized * fader_height as f64) as f32;
+                                    let segment_height = bottom_y - top_y;
+
+                                    if segment_height > 0.0 {
+                                        let segment_rect = egui::Rect::from_min_size(
+                                            egui::pos2(meter_rect.min.x, top_y),
+                                            egui::vec2(meter_width, segment_height),
+                                        );
+                                        painter.rect_filled(segment_rect, 0.0, color);
+                                    }
+                                }
+                            }
+                        }
+
+                        // Draw clip indicator at the top if clipping
+                        if is_clipping {
+                            let clip_indicator_height = 8.0;
+                            let clip_rect = egui::Rect::from_min_size(
+                                egui::pos2(meter_rect.min.x, meter_rect.min.y),
+                                egui::vec2(meter_width, clip_indicator_height),
+                            );
+                            painter.rect_filled(clip_rect, 0.0, egui::Color32::from_rgb(255, 0, 0));
+                        }
+
+                        // Draw peak hold line
+                        let peak_key = format!("{}_{}", meter_id, channel_suffix);
+                        if let Some(&(peak_val, _)) = peak_holds
+                            .get(&peak_key)
+                            .filter(|(val, _)| *val > -50.0 && *val < 10.0)
+                        {
+                            let peak_normalized = (peak_val + 50.0) / 60.0;
+                            let peak_y =
+                                meter_rect.max.y - (peak_normalized * fader_height as f64) as f32;
+                            painter.line_segment(
+                                [
+                                    egui::pos2(meter_rect.min.x, peak_y),
+                                    egui::pos2(meter_rect.max.x, peak_y),
+                                ],
+                                egui::Stroke::new(2.0, egui::Color32::WHITE),
+                            );
+                        }
+
+                        // Draw running average line
+                        let avg_key = format!("{}_{}", meter_id, channel_suffix);
+                        let history = meter_averages.get(&avg_key);
+                        if let Some(history) = history.filter(|h| !h.is_empty()) {
+                            let avg_val = history.iter().map(|(val, _)| val).sum::<f64>()
+                                / history.len() as f64;
+                            if avg_val > -50.0 && avg_val < 10.0 {
+                                let avg_normalized = (avg_val + 50.0) / 60.0;
+                                let avg_y = meter_rect.max.y
+                                    - (avg_normalized * fader_height as f64) as f32;
+                                painter.line_segment(
+                                    [
+                                        egui::pos2(meter_rect.min.x, avg_y),
+                                        egui::pos2(meter_rect.max.x, avg_y),
+                                    ],
+                                    egui::Stroke::new(4.0, egui::Color32::from_rgb(79, 0, 255)),
+                                );
+                            }
+                        }
+                    };
+
+                // Draw left meter (or mono meter)
+                draw_single_meter(painter, left_meter_rect, meter_value, "L");
+
+                // Draw right meter if stereo
+                if let Some(right_val) = meter_value_right {
+                    if let Some(right_rect) = right_meter_rect {
+                        draw_single_meter(painter, right_rect, right_val, "R");
                     }
                 }
-            });
-            
+
+                // Draw fader cap
+                let cap_rect = egui::Rect::from_center_size(
+                    egui::pos2(fader_rect.center().x, cap_y),
+                    egui::vec2(cap_width, cap_height),
+                );
+
+                // Cap shadow
+                painter.rect_filled(
+                    cap_rect.translate(egui::vec2(1.0, 2.0)),
+                    3.0,
+                    egui::Color32::from_black_alpha(100),
+                );
+
+                // Cap gradient effect
+                painter.rect_filled(cap_rect, 3.0, egui::Color32::from_gray(180));
+                painter.rect_stroke(
+                    cap_rect,
+                    3.0,
+                    egui::Stroke::new(1.0, egui::Color32::from_gray(220)),
+                );
+
+                // Cap highlight
+                let highlight_rect = egui::Rect::from_min_size(
+                    cap_rect.min,
+                    egui::vec2(cap_width, cap_height / 3.0),
+                );
+                painter.rect_filled(highlight_rect, 3.0, egui::Color32::from_gray(220));
+
+                // Center grip line
+                painter.line_segment(
+                    [
+                        egui::pos2(cap_rect.center().x - 8.0, cap_y),
+                        egui::pos2(cap_rect.center().x + 8.0, cap_y),
+                    ],
+                    egui::Stroke::new(2.0, egui::Color32::from_gray(100)),
+                );
+
+                ui.add_space(10.0);
+
+                // Mute and Solo buttons side by side
+                ui.horizontal(|ui| {
+                    // Mute button
+                    let muted = strip.mute;
+                    let muted_by_solo = strip.mute_by_solo;
+
+                    // Determine button color: if muted by solo, show red text on dark gray background
+                    // If manually muted, show black text on red background
+                    let (button_fill, text_color) = if muted {
+                        (egui::Color32::RED, egui::Color32::BLACK)
+                    } else if muted_by_solo {
+                        (egui::Color32::from_rgb(40, 0, 0), egui::Color32::RED)
+                    } else {
+                        (egui::Color32::from_rgb(40, 0, 0), egui::Color32::LIGHT_GRAY)
+                    };
+
+                    let mute_response = ui.add(
+                        egui::Button::new(egui::RichText::new("M").color(text_color))
+                            .min_size(egui::vec2(35.0, 25.0))
+                            .fill(button_fill),
+                    );
+
+                    if mute_response.secondary_clicked() {
+                        // Right-click to start MIDI learn
+                        action = StripAction::StartMidiLearnMute;
+                    } else if mute_response.clicked() {
+                        strip.mute = !muted;
+                        action = StripAction::FaderChanged;
+                    }
+
+                    // Solo button (only for channel strips)
+                    if matches!(strip.kind, usb::StripKind::Channel) {
+                        let soloed = strip.solo;
+                        let text_color = if soloed {
+                            egui::Color32::BLACK
+                        } else {
+                            egui::Color32::LIGHT_GRAY
+                        };
+                        let solo_response = ui.add(
+                            egui::Button::new(egui::RichText::new("S").color(text_color))
+                                .min_size(egui::vec2(35.0, 25.0))
+                                .fill(if soloed {
+                                    egui::Color32::YELLOW
+                                } else {
+                                    egui::Color32::from_rgb(40, 40, 0)
+                                }),
+                        );
+
+                        if solo_response.secondary_clicked() {
+                            // Right-click to start MIDI learn
+                            action = StripAction::StartMidiLearnSolo;
+                        } else if solo_response.clicked() {
+                            action = StripAction::SoloToggled;
+                        }
+                    }
+                });
+
                 // Add padding at bottom to prevent scrollbar from obscuring buttons
                 ui.add_space(20.0);
             });
         });
-        
+
         action
     }
 }
@@ -831,7 +860,7 @@ impl eframe::App for BatonApp {
 
                 // Global controls
                 let mut ps = self.ps.lock().unwrap();
-                
+
                 let phantom_power = ps.phantom_power;
                 if ui
                     .add(egui::Button::new("48V").fill(if phantom_power {
@@ -901,18 +930,20 @@ impl eframe::App for BatonApp {
                 // Reset solo button
                 let solo_exists = ps.mixes[self.active_mix_index].has_solo();
                 if ui
-                    .add(egui::Button::new(
-                        egui::RichText::new("Reset solo")
-                            .color(if solo_exists {
+                    .add(
+                        egui::Button::new(egui::RichText::new("Reset solo").color(
+                            if solo_exists {
                                 egui::Color32::BLACK
                             } else {
                                 egui::Color32::LIGHT_GRAY
-                            })
-                    ).fill(if solo_exists {
-                        egui::Color32::YELLOW
-                    } else {
-                        egui::Color32::DARK_GRAY
-                    }))
+                            },
+                        ))
+                        .fill(if solo_exists {
+                            egui::Color32::YELLOW
+                        } else {
+                            egui::Color32::DARK_GRAY
+                        }),
+                    )
                     .clicked()
                 {
                     ps.mixes[self.active_mix_index].reset_solo();
@@ -922,18 +953,20 @@ impl eframe::App for BatonApp {
                 // Reset mute button
                 let mute_exists = ps.mixes[self.active_mix_index].has_mute();
                 if ui
-                    .add(egui::Button::new(
-                        egui::RichText::new("Reset mute")
-                            .color(if mute_exists {
+                    .add(
+                        egui::Button::new(egui::RichText::new("Reset mute").color(
+                            if mute_exists {
                                 egui::Color32::BLACK
                             } else {
                                 egui::Color32::LIGHT_GRAY
-                            })
-                    ).fill(if mute_exists {
-                        egui::Color32::RED
-                    } else {
-                        egui::Color32::DARK_GRAY
-                    }))
+                            },
+                        ))
+                        .fill(if mute_exists {
+                            egui::Color32::RED
+                        } else {
+                            egui::Color32::DARK_GRAY
+                        }),
+                    )
                     .clicked()
                 {
                     ps.mixes[self.active_mix_index].reset_mute();
@@ -953,12 +986,13 @@ impl eframe::App for BatonApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             // Get available height for strips
             let available_height = ui.available_height();
-            
+
             egui::ScrollArea::horizontal().show(ui, |ui| {
                 ui.horizontal(|ui| {
                     // Collect strip data
                     let ps = self.ps.lock().unwrap();
-                    let strip_data: Vec<(String, f64)> = ps.channel_names
+                    let strip_data: Vec<(String, f64)> = ps
+                        .channel_names
                         .iter()
                         .zip(ps.channel_meters.iter())
                         .map(|(name, meter)| (name.clone(), meter.value))
@@ -978,12 +1012,12 @@ impl eframe::App for BatonApp {
                         let (mut name, meter_value) = strip_data[i].clone();
                         let meter_id = format!("ch_{}", i);
                         let action = Self::draw_strip(
-                            ui, 
-                            strip, 
-                            &mut name, 
-                            meter_value, 
-                            None, 
-                            available_height, 
+                            ui,
+                            strip,
+                            &mut name,
+                            meter_value,
+                            None,
+                            available_height,
                             &mut self.clip_indicators,
                             &mut self.peak_holds,
                             &mut self.meter_averages,
@@ -1011,7 +1045,7 @@ impl eframe::App for BatonApp {
                     );
                     let bus_strip_index = mix.strips.channel_strips.len();
                     strip_actions.push((bus_strip_index, bus_action));
-                    
+
                     // Process actions
                     for (strip_index, action) in strip_actions {
                         match action {
@@ -1023,40 +1057,56 @@ impl eframe::App for BatonApp {
                                 ps.write_state();
                             }
                             StripAction::StartMidiLearnFader => {
-                                let target = midi_control::ControlTarget::Strip(midi_control::StripTarget {
-                                    mix_index: self.active_mix_index,
-                                    strip_index,
-                                    control: midi_control::StripControl::Fader,
-                                });
+                                let target =
+                                    midi_control::ControlTarget::Strip(midi_control::StripTarget {
+                                        mix_index: self.active_mix_index,
+                                        strip_index,
+                                        control: midi_control::StripControl::Fader,
+                                    });
                                 self.midi_learn_state = self.midi_mapping.start_learning(target);
-                                self.status_message = format!("Learning MIDI for strip {} fader - move a MIDI control...", strip_index + 1);
+                                self.status_message = format!(
+                                    "Learning MIDI for strip {} fader - move a MIDI control...",
+                                    strip_index + 1
+                                );
                             }
                             StripAction::StartMidiLearnPan => {
-                                let target = midi_control::ControlTarget::Strip(midi_control::StripTarget {
-                                    mix_index: self.active_mix_index,
-                                    strip_index,
-                                    control: midi_control::StripControl::Balance,
-                                });
+                                let target =
+                                    midi_control::ControlTarget::Strip(midi_control::StripTarget {
+                                        mix_index: self.active_mix_index,
+                                        strip_index,
+                                        control: midi_control::StripControl::Balance,
+                                    });
                                 self.midi_learn_state = self.midi_mapping.start_learning(target);
-                                self.status_message = format!("Learning MIDI for strip {} pan - move a MIDI control...", strip_index + 1);
+                                self.status_message = format!(
+                                    "Learning MIDI for strip {} pan - move a MIDI control...",
+                                    strip_index + 1
+                                );
                             }
                             StripAction::StartMidiLearnMute => {
-                                let target = midi_control::ControlTarget::Strip(midi_control::StripTarget {
-                                    mix_index: self.active_mix_index,
-                                    strip_index,
-                                    control: midi_control::StripControl::Mute,
-                                });
+                                let target =
+                                    midi_control::ControlTarget::Strip(midi_control::StripTarget {
+                                        mix_index: self.active_mix_index,
+                                        strip_index,
+                                        control: midi_control::StripControl::Mute,
+                                    });
                                 self.midi_learn_state = self.midi_mapping.start_learning(target);
-                                self.status_message = format!("Learning MIDI for strip {} mute - move a MIDI control...", strip_index + 1);
+                                self.status_message = format!(
+                                    "Learning MIDI for strip {} mute - move a MIDI control...",
+                                    strip_index + 1
+                                );
                             }
                             StripAction::StartMidiLearnSolo => {
-                                let target = midi_control::ControlTarget::Strip(midi_control::StripTarget {
-                                    mix_index: self.active_mix_index,
-                                    strip_index,
-                                    control: midi_control::StripControl::Solo,
-                                });
+                                let target =
+                                    midi_control::ControlTarget::Strip(midi_control::StripTarget {
+                                        mix_index: self.active_mix_index,
+                                        strip_index,
+                                        control: midi_control::StripControl::Solo,
+                                    });
                                 self.midi_learn_state = self.midi_mapping.start_learning(target);
-                                self.status_message = format!("Learning MIDI for strip {} solo - move a MIDI control...", strip_index + 1);
+                                self.status_message = format!(
+                                    "Learning MIDI for strip {} solo - move a MIDI control...",
+                                    strip_index + 1
+                                );
                             }
                             StripAction::NameChanged(new_name) => {
                                 // Update channel name or mix name
