@@ -16,7 +16,7 @@ mod usb;
 
 enum StripAction {
     None,
-    FaderChanged,
+    FaderChanged(f64, String),
     SoloToggled,
     StartMidiLearnFader,
     StartMidiLearnPan,
@@ -397,14 +397,14 @@ impl BatonApp {
                         } else if response.double_clicked() {
                             balance = 0.0;
                             strip.balance = 0.0;
-                            action = StripAction::FaderChanged;
+                            action = StripAction::FaderChanged(strip.fader, name.clone());
                         } else if response.dragged() {
                             let delta = response.drag_delta();
                             // Use both horizontal and vertical drag (right = positive, down = negative)
                             let combined_delta = delta.x - delta.y;
                             balance = (balance + combined_delta * 0.5).clamp(-100.0, 100.0);
                             strip.balance = balance as f64;
-                            action = StripAction::FaderChanged;
+                            action = StripAction::FaderChanged(strip.fader, name.clone());
                         }
 
                         // Draw the knob
@@ -469,7 +469,7 @@ impl BatonApp {
                 } else if response.double_clicked() {
                     fader_value = 0.0;
                     strip.set_fader(0.0);
-                    action = StripAction::FaderChanged;
+                    action = StripAction::FaderChanged(0.0, name.clone());
                 } else if response.dragged() {
                     let delta_y = response.drag_delta().y;
                     // Convert pixel delta to dB range (-50 to +10)
@@ -479,7 +479,7 @@ impl BatonApp {
                     let db_per_pixel = (60.0 / fader_height) / sensitivity;
                     fader_value = (fader_value - delta_y * db_per_pixel).clamp(-50.0, 10.0);
                     strip.set_fader(fader_value as f64);
-                    action = StripAction::FaderChanged;
+                    action = StripAction::FaderChanged(fader_value as f64, name.clone());
                 }
 
                 // Allocate meter rectangles and check for clicks (before getting painter)
@@ -822,7 +822,7 @@ impl BatonApp {
                             action = StripAction::StartMidiLearnMute;
                         } else if mute_response.clicked() {
                             strip.mute = !muted;
-                            action = StripAction::FaderChanged;
+                            action = StripAction::FaderChanged(strip.fader, name.clone());
                         }
 
                         // Solo button (only for channel strips)
@@ -1107,8 +1107,9 @@ impl eframe::App for BatonApp {
                     // Process actions
                     for (strip_index, action) in strip_actions {
                         match action {
-                            StripAction::FaderChanged => {
+                            StripAction::FaderChanged(fader_value, strip_name) => {
                                 ps.write_channel_fader(self.active_mix_index, strip_index);
+                                self.status_message = format!("{}: {:.1} dB", strip_name, fader_value);
                             }
                             StripAction::SoloToggled => {
                                 ps.mixes[self.active_mix_index].toggle_solo(strip_index);
