@@ -324,16 +324,17 @@ impl BatonApp {
 
         let frame = egui::Frame::none()
             .fill(bg_color)
-            .inner_margin(egui::Margin::same(5.0));
+            .inner_margin(egui::Margin::same(3.0))
+            .outer_margin(egui::Margin::ZERO);
 
         frame.show(ui, |ui| {
             ui.vertical(|ui| {
-                ui.set_width(120.0);
+                ui.set_width(70.0);
 
                 // Strip name (editable with right-click color picker)
                 let name_response = ui.add(
                     egui::TextEdit::singleline(name)
-                        .desired_width(120.0)
+                        .desired_width(80.0)
                         .font(egui::TextStyle::Body),
                 );
                 if name_response.changed() {
@@ -374,6 +375,7 @@ impl BatonApp {
                 });
 
                 // Balance knob at top (only for channel strips), or blank space for alignment
+                let knob_radius = 15.0;
                 if matches!(strip.kind, usb::StripKind::Channel) {
                     ui.add_space(5.0);
 
@@ -381,7 +383,6 @@ impl BatonApp {
                         let mut balance = strip.balance as f32;
 
                         // Draw a knob control
-                        let knob_radius = 15.0;
                         let (knob_rect, response) = ui.allocate_exact_size(
                             egui::vec2(knob_radius * 2.0, knob_radius * 2.0),
                             egui::Sense::click_and_drag(),
@@ -436,14 +437,10 @@ impl BatonApp {
                     // Match the exact structure: spacing + vertical_centered with knob size + spacing
                     ui.add_space(5.0);
                     ui.vertical_centered(|ui| {
-                        let knob_radius = 25.0;
                         ui.allocate_space(egui::vec2(knob_radius * 2.0, knob_radius * 2.0));
                     });
                     ui.add_space(5.0);
                 }
-
-                // Fader value display
-                ui.add(egui::Label::new(format!("{:.1} dB", strip.fader)).halign(egui::Align::Max));
 
                 // Custom Fader
                 let mut fader_value = strip.fader as f32;
@@ -793,60 +790,63 @@ impl BatonApp {
                 ui.add_space(10.0);
 
                 // Mute and Solo buttons side by side
-                ui.horizontal(|ui| {
-                    // Mute button
-                    let muted = strip.mute;
-                    let muted_by_solo = strip.mute_by_solo;
+                ui.vertical_centered(|ui| {
+                    ui.horizontal(|ui| {
+                        // Mute button
+                        let muted = strip.mute;
+                        let muted_by_solo = strip.mute_by_solo;
 
-                    // Determine button color: if muted by solo, show red text on dark gray background
-                    // If manually muted, show black text on red background
-                    let (button_fill, text_color) = if muted {
-                        (egui::Color32::RED, egui::Color32::BLACK)
-                    } else if muted_by_solo {
-                        (egui::Color32::from_rgb(40, 0, 0), egui::Color32::RED)
-                    } else {
-                        (egui::Color32::from_rgb(40, 0, 0), egui::Color32::LIGHT_GRAY)
-                    };
-
-                    let mute_response = ui.add(
-                        egui::Button::new(egui::RichText::new("M").color(text_color))
-                            .min_size(egui::vec2(35.0, 25.0))
-                            .fill(button_fill),
-                    );
-
-                    if mute_response.secondary_clicked() {
-                        // Right-click to start MIDI learn
-                        action = StripAction::StartMidiLearnMute;
-                    } else if mute_response.clicked() {
-                        strip.mute = !muted;
-                        action = StripAction::FaderChanged;
-                    }
-
-                    // Solo button (only for channel strips)
-                    if matches!(strip.kind, usb::StripKind::Channel) {
-                        let soloed = strip.solo;
-                        let text_color = if soloed {
-                            egui::Color32::BLACK
+                        // Determine button color: if muted by solo, show red text on dark gray background
+                        // If manually muted, show black text on red background
+                        let (button_fill, text_color) = if muted {
+                            (egui::Color32::RED, egui::Color32::BLACK)
+                        } else if muted_by_solo {
+                            (egui::Color32::from_rgb(40, 0, 0), egui::Color32::RED)
                         } else {
-                            egui::Color32::LIGHT_GRAY
+                            (egui::Color32::from_rgb(40, 0, 0), egui::Color32::LIGHT_GRAY)
                         };
-                        let solo_response = ui.add(
-                            egui::Button::new(egui::RichText::new("S").color(text_color))
-                                .min_size(egui::vec2(35.0, 25.0))
-                                .fill(if soloed {
-                                    egui::Color32::YELLOW
-                                } else {
-                                    egui::Color32::from_rgb(40, 40, 0)
-                                }),
+
+                        let mute_response = ui.add(
+                            egui::Button::new(egui::RichText::new("M").color(text_color))
+                                .min_size(egui::vec2(25.0, 25.0))
+                                .fill(button_fill)
+                                .small(),
                         );
 
-                        if solo_response.secondary_clicked() {
+                        if mute_response.secondary_clicked() {
                             // Right-click to start MIDI learn
-                            action = StripAction::StartMidiLearnSolo;
-                        } else if solo_response.clicked() {
-                            action = StripAction::SoloToggled;
+                            action = StripAction::StartMidiLearnMute;
+                        } else if mute_response.clicked() {
+                            strip.mute = !muted;
+                            action = StripAction::FaderChanged;
                         }
-                    }
+
+                        // Solo button (only for channel strips)
+                        if matches!(strip.kind, usb::StripKind::Channel) {
+                            let soloed = strip.solo;
+                            let text_color = if soloed {
+                                egui::Color32::BLACK
+                            } else {
+                                egui::Color32::LIGHT_GRAY
+                            };
+                            let solo_response = ui.add(
+                                egui::Button::new(egui::RichText::new("S").color(text_color))
+                                    .min_size(egui::vec2(25.0, 25.0))
+                                    .fill(if soloed {
+                                        egui::Color32::YELLOW
+                                    } else {
+                                        egui::Color32::from_rgb(40, 40, 0)
+                                    }),
+                            );
+
+                            if solo_response.secondary_clicked() {
+                                // Right-click to start MIDI learn
+                                action = StripAction::StartMidiLearnSolo;
+                            } else if solo_response.clicked() {
+                                action = StripAction::SoloToggled;
+                            }
+                        }
+                    });
                 });
 
                 // Add padding at bottom to prevent scrollbar from obscuring buttons
@@ -1064,7 +1064,7 @@ impl eframe::App for BatonApp {
                             custom_color,
                         );
                         strip_actions.push((i, action));
-                        ui.separator();
+                        ui.add(egui::Separator::default().spacing(2.0));
                     }
 
                     // Draw bus strip (stereo - with left and right meters)
