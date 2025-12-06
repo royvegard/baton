@@ -290,7 +290,7 @@ impl PreSonusStudio1824c {
     }
 
     pub fn load_config(&mut self, config: &str) {
-        let ps_state = serde_json::from_str::<PreSonusStudio1824c>(config).unwrap();
+        let ps_state = serde_json::from_str::<PreSonusStudio1824c>(config).unwrap_or_default();
         self.channel_names = ps_state.channel_names;
 
         let mix_state = ps_state.mixes;
@@ -304,13 +304,12 @@ impl PreSonusStudio1824c {
                     mix_state[i].strips.channel_strips[j].solo;
                 self.mixes[i].strips.channel_strips[j].mute =
                     mix_state[i].strips.channel_strips[j].mute;
-                self.mixes[i].strips.channel_strips[j].mute_by_solo =
-                    mix_state[i].strips.channel_strips[j].mute_by_solo;
             }
 
             self.mixes[i].name = mix_state[i].name.clone();
             self.mixes[i].strips.bus_strip.fader = mix_state[i].strips.bus_strip.fader;
             self.mixes[i].strips.bus_strip.mute = mix_state[i].strips.bus_strip.mute;
+            self.mixes[i].sync_solo();
         }
     }
 
@@ -538,6 +537,7 @@ pub struct Strip {
     pub balance: f64,
     pub solo: bool,
     pub mute: bool,
+    #[serde(skip)]
     pub mute_by_solo: bool,
     #[serde(skip)]
     pub max: f64,
@@ -715,23 +715,26 @@ impl Mix {
     pub fn toggle_solo(&mut self, index: usize) {
         if self.strips.iter().nth(index).unwrap().kind == StripKind::Channel {
             self.strips.channel_strips[index].solo = !self.strips.channel_strips[index].solo;
+            self.sync_solo();
+        }
+    }
 
-            let mut solo_exists = false;
-            for s in self.strips.channel_strips.iter() {
-                if s.solo {
-                    solo_exists = true;
-                    break;
-                }
+    pub fn sync_solo(&mut self) {
+        let mut solo_exists = false;
+        for s in self.strips.channel_strips.iter() {
+            if s.solo {
+                solo_exists = true;
+                break;
             }
+        }
 
-            if solo_exists {
-                for strip in self.strips.channel_strips.iter_mut() {
-                    strip.mute_by_solo = !strip.solo;
-                }
-            } else {
-                for strip in self.strips.channel_strips.iter_mut() {
-                    strip.mute_by_solo = false;
-                }
+        if solo_exists {
+            for strip in self.strips.channel_strips.iter_mut() {
+                strip.mute_by_solo = !strip.solo;
+            }
+        } else {
+            for strip in self.strips.channel_strips.iter_mut() {
+                strip.mute_by_solo = false;
             }
         }
     }
