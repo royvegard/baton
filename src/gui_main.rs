@@ -56,6 +56,7 @@ struct BatonApp {
     midi_input: Option<midi::MidiInput>,
     midi_mapping: midi_control::MidiMapping,
     midi_learn_state: midi_control::MidiLearnState,
+    midi_learn_start_time: Option<Instant>,
     active_mix_index: usize,
     active_strip_index: usize,
     last_tick: Instant,
@@ -120,6 +121,7 @@ impl BatonApp {
             midi_input,
             midi_mapping,
             midi_learn_state: midi_control::MidiLearnState::Inactive,
+            midi_learn_start_time: None,
             active_mix_index: 0,
             active_strip_index: 0,
             last_tick: Instant::now(),
@@ -183,6 +185,7 @@ impl BatonApp {
                                 channel, controller
                             );
                             self.midi_learn_state = midi_control::MidiLearnState::Inactive;
+                            self.midi_learn_start_time = None;
                             should_save = true;
                         }
                         continue;
@@ -528,7 +531,8 @@ impl BatonApp {
 
                 // Draw scale marks at 6dB intervals: +6, -6, -12, -18, -24, -30, -36, -42, -48
                 let db_marks = [
-                    6.0, 3.0, -3.0, -6.0, -9.0, -12.0, -18.0, -24.0, -30.0, -36.0, -42.0, -48.0,
+                    9.0, 6.0, 3.0, -3.0, -6.0, -9.0, -12.0, -18.0, -24.0, -30.0, -36.0, -42.0,
+                    -48.0,
                 ];
                 for &db_value in &db_marks {
                     // Calculate position for this dB value (linear scale)
@@ -860,6 +864,17 @@ impl BatonApp {
 
 impl eframe::App for BatonApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Check for MIDI learn timeout (5 seconds)
+        if self.midi_learn_state != midi_control::MidiLearnState::Inactive {
+            if let Some(start_time) = self.midi_learn_start_time {
+                if start_time.elapsed() >= Duration::from_secs(5) {
+                    self.midi_learn_state = midi_control::MidiLearnState::Inactive;
+                    self.midi_learn_start_time = None;
+                    self.status_message = "MIDI Learn: Timed out after 5 seconds".to_string();
+                }
+            }
+        }
+
         // Poll device state periodically
         if self.last_tick.elapsed() >= self.tick_rate {
             let mut ps = self.ps.lock().unwrap();
@@ -1107,6 +1122,7 @@ impl eframe::App for BatonApp {
                                         control: midi_control::StripControl::Fader,
                                     });
                                 self.midi_learn_state = self.midi_mapping.start_learning(target);
+                                self.midi_learn_start_time = Some(Instant::now());
                                 self.status_message = format!(
                                     "Learning MIDI for strip {} fader - move a MIDI control...",
                                     strip_index + 1
@@ -1120,6 +1136,7 @@ impl eframe::App for BatonApp {
                                         control: midi_control::StripControl::Balance,
                                     });
                                 self.midi_learn_state = self.midi_mapping.start_learning(target);
+                                self.midi_learn_start_time = Some(Instant::now());
                                 self.status_message = format!(
                                     "Learning MIDI for strip {} pan - move a MIDI control...",
                                     strip_index + 1
@@ -1133,6 +1150,7 @@ impl eframe::App for BatonApp {
                                         control: midi_control::StripControl::Mute,
                                     });
                                 self.midi_learn_state = self.midi_mapping.start_learning(target);
+                                self.midi_learn_start_time = Some(Instant::now());
                                 self.status_message = format!(
                                     "Learning MIDI for strip {} mute - move a MIDI control...",
                                     strip_index + 1
@@ -1146,6 +1164,7 @@ impl eframe::App for BatonApp {
                                         control: midi_control::StripControl::Solo,
                                     });
                                 self.midi_learn_state = self.midi_mapping.start_learning(target);
+                                self.midi_learn_start_time = Some(Instant::now());
                                 self.status_message = format!(
                                     "Learning MIDI for strip {} solo - move a MIDI control...",
                                     strip_index + 1
