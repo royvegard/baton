@@ -325,9 +325,9 @@ impl BatonApp {
             usb::StripKind::Channel => egui::Color32::TRANSPARENT, // No background for channels
         });
 
-        let frame = egui::Frame::none()
+        let frame = egui::Frame::new()
             .fill(bg_color)
-            .inner_margin(egui::Margin::same(3.0))
+            .inner_margin(egui::Margin::same(3))
             .outer_margin(egui::Margin::ZERO);
 
         frame.show(ui, |ui| {
@@ -366,14 +366,14 @@ impl BatonApp {
                             .clicked()
                         {
                             action = StripAction::ColorChanged(color);
-                            ui.close_menu();
+                            ui.close();
                         }
                     }
 
                     ui.separator();
                     if ui.button("Reset to default").clicked() {
                         action = StripAction::ColorChanged(egui::Color32::TRANSPARENT);
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
 
@@ -773,6 +773,7 @@ impl BatonApp {
                     cap_rect,
                     3.0,
                     egui::Stroke::new(1.0, egui::Color32::from_gray(220)),
+                    egui::StrokeKind::Middle,
                 );
 
                 // Cap highlight

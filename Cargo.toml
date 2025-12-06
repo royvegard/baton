@@ -17,7 +17,7 @@ debug = true
 [dependencies]
 flexi_logger = "0.31.1"
 futures-lite = "2.6.0"
-log = "0.4.27"
+log = "0.4"
 nusb = "0.2.1"
 ratatui = "0.29"
 serde = { version = "1.0", features = ["derive"] }
@@ -25,5 +25,5 @@ serde_json = "1.0"
 baton-studio = { version = "0.1.0", path = "../baton_studio" }
 tui-input = "0.14.0"
 alsa = "0.10.0"
-eframe = "0.29"
-egui = "0.29"
+eframe = "0.33"
+egui = "0.33"
