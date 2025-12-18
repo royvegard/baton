@@ -20,13 +20,17 @@ impl MidiInput {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let (sender, receiver) = mpsc::channel();
 
+        // Initialize ALSA sequencer synchronously to catch errors early
+        let seq = initialize_midi_sequencer()?;
+
+        log::info!("ALSA MIDI sequencer port initialized");
+
+        // Spawn thread for event loop
         thread::spawn(move || {
-            if let Err(e) = run_midi_loop(sender) {
+            if let Err(e) = run_midi_event_loop(seq, sender) {
                 log::error!("MIDI thread error: {}", e);
             }
         });
-
-        log::info!("ALSA MIDI sequencer port initialized");
 
         Ok(MidiInput { receiver })
     }
@@ -36,7 +40,7 @@ impl MidiInput {
     }
 }
 
-fn run_midi_loop(sender: Sender<MidiMessage>) -> Result<(), Box<dyn std::error::Error>> {
+fn initialize_midi_sequencer() -> Result<seq::Seq, Box<dyn std::error::Error>> {
     // Open ALSA sequencer
     let seq = seq::Seq::open(None, Some(Direction::Capture), false)?;
     let client_name = CString::new("Baton")?;
@@ -56,13 +60,11 @@ fn run_midi_loop(sender: Sender<MidiMessage>) -> Result<(), Box<dyn std::error::
         client_id,
         port
     );
-    log::info!(
-        "Connect MIDI devices using: aconnect <source-port> {}:{}",
-        client_id,
-        port
-    );
-    log::info!("Or use: aconnect <source-port> Baton:baton-midi-in");
 
+    Ok(seq)
+}
+
+fn run_midi_event_loop(seq: seq::Seq, sender: Sender<MidiMessage>) -> Result<(), Box<dyn std::error::Error>> {
     // Set up input for receiving events
     let mut input = seq.input();
 
