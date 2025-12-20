@@ -3,7 +3,6 @@ use eframe::egui;
 use flexi_logger::{FileSpec, detailed_format};
 use std::{
     collections::HashMap,
-    env,
     fs::File,
     io::{Read, Write},
     sync::{Arc, Mutex},
@@ -53,6 +52,7 @@ fn main() -> eframe::Result {
 
 struct BatonApp {
     ps: Arc<Mutex<usb::PreSonusStudio1824c>>,
+    config_dir: Option<std::path::PathBuf>,
     midi_input: Option<midi::MidiInput>,
     midi_mapping: midi_control::MidiMapping,
     midi_learn_state: midi_control::MidiLearnState,
@@ -82,42 +82,60 @@ impl BatonApp {
             }
         };
 
-        // Load or create MIDI mapping
-        let midi_mapping_file = match env::var("HOME") {
-            Ok(h) => format!("{h}/.baton_midi_mapping.json"),
-            Err(_) => ".baton_midi_mapping.json".to_string(),
-        };
-
-        let midi_mapping = if let Ok(mut file) = File::open(&midi_mapping_file) {
-            let mut contents = String::new();
-            file.read_to_string(&mut contents).ok();
-            serde_json::from_str(&contents)
-                .unwrap_or_else(|_| midi_control::MidiMapping::create_default())
-        } else {
-            midi_control::MidiMapping::create_default()
-        };
+        // Initialize config directory
+        let mut config_dir = dirs::config_dir().map(|d| d.join("baton"));
+        if let Some(ref dir) = config_dir {
+            if !dir.exists() {
+                if let Err(e) = std::fs::create_dir_all(dir) {
+                    log::warn!("Failed to create config directory {}: {}", dir.display(), e);
+                    config_dir = None;
+                }
+            }
+        }
 
         let ps = Arc::new(Mutex::new(
             usb::PreSonusStudio1824c::new().expect("Failed to open device"),
         ));
 
         // Load config
-        let config_file = match env::var("HOME") {
-            Ok(h) => format!("{h}/.baton.json"),
-            Err(_) => "baton.json".to_string(),
-        };
+        let mut midi_mapping = midi_control::MidiMapping::create_default();
+        match config_dir {
+            Some(ref dir) => {
+                let config_file = dir.join("config.json");
+                if let Ok(mut file) = File::open(&config_file) {
+                    let mut serialized = String::new();
+                    if file.read_to_string(&mut serialized).is_ok() {
+                        let mut ps_lock = ps.lock().unwrap();
+                        ps_lock.load_config(&serialized);
+                        ps_lock.write_state();
+                    }
+                }
 
-        if let Ok(mut file) = File::open(&config_file) {
-            let mut serialized = String::new();
-            if file.read_to_string(&mut serialized).is_ok() {
-                let mut ps_lock = ps.lock().unwrap();
-                ps_lock.load_config(&serialized);
-                ps_lock.write_state();
+                // Load MIDI mapping
+                let midi_mapping_file = dir.join("midi_mapping.json");
+                if let Ok(mut file) = File::open(&midi_mapping_file) {
+                    let mut contents = String::new();
+                    file.read_to_string(&mut contents).ok();
+                    match serde_json::from_str(&contents) {
+                        Ok(mapping) => {
+                            midi_mapping = mapping;
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "Failed to parse MIDI mapping from {}: {}",
+                                midi_mapping_file.display(),
+                                e
+                            );
+                        }
+                    }
+                }
             }
+            None => (),
         }
 
         Self {
             ps,
+            config_dir,
             midi_input,
             midi_mapping,
             midi_learn_state: midi_control::MidiLearnState::Inactive,
@@ -289,17 +307,18 @@ impl BatonApp {
     }
 
     fn save_midi_mapping(&mut self) {
-        let midi_mapping_file = match env::var("HOME") {
-            Ok(h) => format!("{h}/.baton_midi_mapping.json"),
-            Err(_) => ".baton_midi_mapping.json".to_string(),
-        };
-
-        self.midi_mapping.sort_mappings();
-        if let Ok(json) = serde_json::to_string_pretty(&self.midi_mapping) {
-            if let Ok(mut file) = File::create(&midi_mapping_file) {
-                let _ = file.write_all(json.as_bytes());
-                let _ = file.flush();
+        match self.config_dir {
+            Some(ref dir) => {
+                let midi_mapping_file = dir.join("midi_mapping.json");
+                self.midi_mapping.sort_mappings();
+                if let Ok(json) = serde_json::to_string_pretty(&self.midi_mapping) {
+                    if let Ok(mut file) = File::create(&midi_mapping_file) {
+                        let _ = file.write_all(json.as_bytes());
+                        let _ = file.flush();
+                    }
+                }
             }
+            None => (),
         }
     }
 
@@ -1110,7 +1129,8 @@ impl eframe::App for BatonApp {
                         match action {
                             StripAction::FaderChanged(fader_value, strip_name) => {
                                 ps.write_channel_fader(self.active_mix_index, strip_index);
-                                self.status_message = format!("{}: {:.1} dB", strip_name, fader_value);
+                                self.status_message =
+                                    format!("{}: {:.1} dB", strip_name, fader_value);
                             }
                             StripAction::SoloToggled => {
                                 ps.mixes[self.active_mix_index].toggle_solo(strip_index);
@@ -1202,20 +1222,21 @@ impl eframe::App for BatonApp {
         log::info!("Saving configuration...");
 
         // Save config
-        let config_file = match env::var("HOME") {
-            Ok(h) => format!("{h}/.baton.json"),
-            Err(_) => "baton.json".to_string(),
-        };
-
-        {
-            let ps = self.ps.lock().unwrap();
-            if let Ok(serialized) = serde_json::to_string_pretty(&*ps) {
-                if let Ok(mut file) = File::create(&config_file) {
-                    let _ = file.write_all(serialized.as_bytes());
-                    let _ = file.flush();
+        match self.config_dir {
+            Some(ref dir) => {
+                let config_file = dir.join("config.json");
+                {
+                    let ps = self.ps.lock().unwrap();
+                    if let Ok(serialized) = serde_json::to_string_pretty(&*ps) {
+                        if let Ok(mut file) = File::create(&config_file) {
+                            let _ = file.write_all(serialized.as_bytes());
+                            let _ = file.flush();
+                        }
+                    }
                 }
             }
-        }
+            None => (),
+        };
 
         // Save MIDI mapping
         self.save_midi_mapping();
