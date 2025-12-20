@@ -1059,7 +1059,9 @@ impl eframe::App for BatonApp {
         egui::SidePanel::right("right_panel")
             .resizable(false)
             .show(ctx, |ui| {
-                let available_height = ui.available_height();
+                // Align with channel strips
+                ui.add_space(6.0);
+                let available_height = ui.available_height() - 6.0;
 
                 let ps = self.ps.lock().unwrap();
                 let bus_name = ps.mixes[self.active_mix_index].name.clone();
