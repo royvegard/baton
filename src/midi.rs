@@ -78,11 +78,11 @@ fn run_midi_event_loop(seq: seq::Seq, sender: Sender<MidiMessage>) -> Result<(),
                 EventType::Controller => {
                     // Control Change - use EvCtrl to extract structured data
                     if let Some(ctrl_data) = event.get_data::<EvCtrl>() {
-                        let _ = sender.send(MidiMessage::ControlChange {
+                        sender.send(MidiMessage::ControlChange {
                             channel: ctrl_data.channel,
                             controller: ctrl_data.param as u8,
                             value: ctrl_data.value as u8,
-                        });
+                        })?;
                         log::debug!(
                             "MIDI CC: ch={}, cc={}, val={}",
                             ctrl_data.channel,

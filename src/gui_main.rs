@@ -1054,6 +1054,48 @@ impl eframe::App for BatonApp {
             });
         });
 
+        let mut strip_actions = Vec::new();
+
+        egui::SidePanel::right("right_panel")
+            .resizable(false)
+            .show(ctx, |ui| {
+                let available_height = ui.available_height();
+
+                let ps = self.ps.lock().unwrap();
+                let bus_name = ps.mixes[self.active_mix_index].name.clone();
+                // Get both left and right bus meters
+                let bus_meter_left = ps.bus_meters[self.active_mix_index * 2].value;
+                let bus_meter_right = ps.bus_meters[self.active_mix_index * 2 + 1].value;
+                drop(ps);
+
+                let mut ps = self.ps.lock().unwrap();
+                let mix = &mut ps.mixes[self.active_mix_index];
+
+                // Draw bus strip (stereo - with left and right meters)
+                let bus_strip = &mut mix.strips.bus_strip;
+                let mut bus_name_mut = bus_name.clone();
+                let meter_id = format!("bus_{}", self.active_mix_index);
+                let bus_strip_index = mix.strips.channel_strips.len();
+                let strip_id = format!("{}:{}", self.active_mix_index, bus_strip_index);
+                let custom_color = self.strip_colors.get(&strip_id).copied();
+                let bus_action = Self::draw_strip(
+                    ui,
+                    bus_strip,
+                    &mut bus_name_mut,
+                    bus_meter_left,
+                    Some(bus_meter_right),
+                    available_height,
+                    &mut self.clip_indicators,
+                    &mut self.peak_holds,
+                    &mut self.meter_averages,
+                    &meter_id,
+                    custom_color,
+                );
+                strip_actions.push((bus_strip_index, bus_action));
+
+                drop(ps);
+            });
+
         // Central panel with strips
         egui::CentralPanel::default().show(ctx, |ui| {
             // Get available height for strips
@@ -1069,15 +1111,10 @@ impl eframe::App for BatonApp {
                         .zip(ps.channel_meters.iter())
                         .map(|(name, meter)| (name.clone(), meter.value))
                         .collect();
-                    let bus_name = ps.mixes[self.active_mix_index].name.clone();
-                    // Get both left and right bus meters
-                    let bus_meter_left = ps.bus_meters[self.active_mix_index * 2].value;
-                    let bus_meter_right = ps.bus_meters[self.active_mix_index * 2 + 1].value;
                     drop(ps);
 
                     let mut ps = self.ps.lock().unwrap();
                     let mix = &mut ps.mixes[self.active_mix_index];
-                    let mut strip_actions = Vec::new();
 
                     // Draw channel strips (mono - no right meter)
                     for (i, strip) in mix.strips.channel_strips.iter_mut().enumerate() {
@@ -1102,120 +1139,96 @@ impl eframe::App for BatonApp {
                         ui.add(egui::Separator::default().spacing(2.0));
                     }
 
-                    // Draw bus strip (stereo - with left and right meters)
-                    let bus_strip = &mut mix.strips.bus_strip;
-                    let mut bus_name_mut = bus_name.clone();
-                    let meter_id = format!("bus_{}", self.active_mix_index);
-                    let bus_strip_index = mix.strips.channel_strips.len();
-                    let strip_id = format!("{}:{}", self.active_mix_index, bus_strip_index);
-                    let custom_color = self.strip_colors.get(&strip_id).copied();
-                    let bus_action = Self::draw_strip(
-                        ui,
-                        bus_strip,
-                        &mut bus_name_mut,
-                        bus_meter_left,
-                        Some(bus_meter_right),
-                        available_height,
-                        &mut self.clip_indicators,
-                        &mut self.peak_holds,
-                        &mut self.meter_averages,
-                        &meter_id,
-                        custom_color,
-                    );
-                    strip_actions.push((bus_strip_index, bus_action));
-
-                    // Process actions
-                    for (strip_index, action) in strip_actions {
-                        match action {
-                            StripAction::FaderChanged(fader_value, strip_name) => {
-                                ps.write_channel_fader(self.active_mix_index, strip_index);
-                                self.status_message =
-                                    format!("{}: {:.1} dB", strip_name, fader_value);
-                            }
-                            StripAction::SoloToggled => {
-                                ps.mixes[self.active_mix_index].toggle_solo(strip_index);
-                                ps.write_state();
-                            }
-                            StripAction::StartMidiLearnFader => {
-                                let target =
-                                    midi_control::ControlTarget::Strip(midi_control::StripTarget {
-                                        mix_index: self.active_mix_index,
-                                        strip_index,
-                                        control: midi_control::StripControl::Fader,
-                                    });
-                                self.midi_learn_state = self.midi_mapping.start_learning(target);
-                                self.midi_learn_start_time = Some(Instant::now());
-                                self.status_message = format!(
-                                    "Learning MIDI for strip {} fader - move a MIDI control...",
-                                    strip_index + 1
-                                );
-                            }
-                            StripAction::StartMidiLearnPan => {
-                                let target =
-                                    midi_control::ControlTarget::Strip(midi_control::StripTarget {
-                                        mix_index: self.active_mix_index,
-                                        strip_index,
-                                        control: midi_control::StripControl::Balance,
-                                    });
-                                self.midi_learn_state = self.midi_mapping.start_learning(target);
-                                self.midi_learn_start_time = Some(Instant::now());
-                                self.status_message = format!(
-                                    "Learning MIDI for strip {} pan - move a MIDI control...",
-                                    strip_index + 1
-                                );
-                            }
-                            StripAction::StartMidiLearnMute => {
-                                let target =
-                                    midi_control::ControlTarget::Strip(midi_control::StripTarget {
-                                        mix_index: self.active_mix_index,
-                                        strip_index,
-                                        control: midi_control::StripControl::Mute,
-                                    });
-                                self.midi_learn_state = self.midi_mapping.start_learning(target);
-                                self.midi_learn_start_time = Some(Instant::now());
-                                self.status_message = format!(
-                                    "Learning MIDI for strip {} mute - move a MIDI control...",
-                                    strip_index + 1
-                                );
-                            }
-                            StripAction::StartMidiLearnSolo => {
-                                let target =
-                                    midi_control::ControlTarget::Strip(midi_control::StripTarget {
-                                        mix_index: self.active_mix_index,
-                                        strip_index,
-                                        control: midi_control::StripControl::Solo,
-                                    });
-                                self.midi_learn_state = self.midi_mapping.start_learning(target);
-                                self.midi_learn_start_time = Some(Instant::now());
-                                self.status_message = format!(
-                                    "Learning MIDI for strip {} solo - move a MIDI control...",
-                                    strip_index + 1
-                                );
-                            }
-                            StripAction::NameChanged(new_name) => {
-                                // Update channel name or mix name
-                                if strip_index < ps.channel_names.len() {
-                                    ps.channel_names[strip_index] = new_name;
-                                } else {
-                                    ps.mixes[self.active_mix_index].name = new_name;
-                                }
-                            }
-                            StripAction::ColorChanged(color) => {
-                                let strip_id = format!("{}:{}", self.active_mix_index, strip_index);
-                                if color == egui::Color32::TRANSPARENT {
-                                    // Reset to default - remove custom color
-                                    self.strip_colors.remove(&strip_id);
-                                } else {
-                                    // Set custom color
-                                    self.strip_colors.insert(strip_id, color);
-                                }
-                            }
-                            StripAction::None => {}
-                        }
-                    }
+                    drop(ps);
                 });
             });
         });
+
+        // Process actions
+        let mut ps = self.ps.lock().unwrap();
+        for (strip_index, action) in strip_actions {
+            match action {
+                StripAction::FaderChanged(fader_value, strip_name) => {
+                    ps.write_channel_fader(self.active_mix_index, strip_index);
+                    self.status_message = format!("{}: {:.1} dB", strip_name, fader_value);
+                }
+                StripAction::SoloToggled => {
+                    ps.mixes[self.active_mix_index].toggle_solo(strip_index);
+                    ps.write_state();
+                }
+                StripAction::StartMidiLearnFader => {
+                    let target = midi_control::ControlTarget::Strip(midi_control::StripTarget {
+                        mix_index: self.active_mix_index,
+                        strip_index,
+                        control: midi_control::StripControl::Fader,
+                    });
+                    self.midi_learn_state = self.midi_mapping.start_learning(target);
+                    self.midi_learn_start_time = Some(Instant::now());
+                    self.status_message = format!(
+                        "Learning MIDI for strip {} fader - move a MIDI control...",
+                        strip_index + 1
+                    );
+                }
+                StripAction::StartMidiLearnPan => {
+                    let target = midi_control::ControlTarget::Strip(midi_control::StripTarget {
+                        mix_index: self.active_mix_index,
+                        strip_index,
+                        control: midi_control::StripControl::Balance,
+                    });
+                    self.midi_learn_state = self.midi_mapping.start_learning(target);
+                    self.midi_learn_start_time = Some(Instant::now());
+                    self.status_message = format!(
+                        "Learning MIDI for strip {} pan - move a MIDI control...",
+                        strip_index + 1
+                    );
+                }
+                StripAction::StartMidiLearnMute => {
+                    let target = midi_control::ControlTarget::Strip(midi_control::StripTarget {
+                        mix_index: self.active_mix_index,
+                        strip_index,
+                        control: midi_control::StripControl::Mute,
+                    });
+                    self.midi_learn_state = self.midi_mapping.start_learning(target);
+                    self.midi_learn_start_time = Some(Instant::now());
+                    self.status_message = format!(
+                        "Learning MIDI for strip {} mute - move a MIDI control...",
+                        strip_index + 1
+                    );
+                }
+                StripAction::StartMidiLearnSolo => {
+                    let target = midi_control::ControlTarget::Strip(midi_control::StripTarget {
+                        mix_index: self.active_mix_index,
+                        strip_index,
+                        control: midi_control::StripControl::Solo,
+                    });
+                    self.midi_learn_state = self.midi_mapping.start_learning(target);
+                    self.midi_learn_start_time = Some(Instant::now());
+                    self.status_message = format!(
+                        "Learning MIDI for strip {} solo - move a MIDI control...",
+                        strip_index + 1
+                    );
+                }
+                StripAction::NameChanged(new_name) => {
+                    // Update channel name or mix name
+                    if strip_index < ps.channel_names.len() {
+                        ps.channel_names[strip_index] = new_name;
+                    } else {
+                        ps.mixes[self.active_mix_index].name = new_name;
+                    }
+                }
+                StripAction::ColorChanged(color) => {
+                    let strip_id = format!("{}:{}", self.active_mix_index, strip_index);
+                    if color == egui::Color32::TRANSPARENT {
+                        // Reset to default - remove custom color
+                        self.strip_colors.remove(&strip_id);
+                    } else {
+                        // Set custom color
+                        self.strip_colors.insert(strip_id, color);
+                    }
+                }
+                StripAction::None => {}
+            }
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
