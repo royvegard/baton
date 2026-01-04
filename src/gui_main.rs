@@ -310,15 +310,62 @@ impl BatonApp {
         match self.config_dir {
             Some(ref dir) => {
                 let midi_mapping_file = dir.join("midi_mapping.json");
-                self.midi_mapping.sort_mappings();
-                if let Ok(json) = serde_json::to_string_pretty(&self.midi_mapping) {
-                    if let Ok(mut file) = File::create(&midi_mapping_file) {
-                        let _ = file.write_all(json.as_bytes());
+                self.save_midi_mapping_to_file(&midi_mapping_file);
+            }
+            None => (),
+        }
+    }
+
+    fn save_midi_mapping_to_file(&mut self, path: &std::path::Path) {
+        self.midi_mapping.sort_mappings();
+        if let Ok(json) = serde_json::to_string_pretty(&self.midi_mapping) {
+            match File::create(path) {
+                Ok(mut file) => {
+                    if let Err(e) = file.write_all(json.as_bytes()) {
+                        self.status_message = format!("Failed to write MIDI mapping: {}", e);
+                        log::error!("Failed to write MIDI mapping to {}: {}", path.display(), e);
+                    } else {
                         let _ = file.flush();
+                        self.status_message = format!("Saved MIDI mapping to {}", path.display());
+                        log::info!("Saved MIDI mapping to {}", path.display());
+                    }
+                }
+                Err(e) => {
+                    self.status_message = format!("Failed to create file: {}", e);
+                    log::error!("Failed to create file {}: {}", path.display(), e);
+                }
+            }
+        } else {
+            self.status_message = "Failed to serialize MIDI mapping".to_string();
+            log::error!("Failed to serialize MIDI mapping");
+        }
+    }
+
+    fn load_midi_mapping_from_file(&mut self, path: &std::path::Path) {
+        match File::open(path) {
+            Ok(mut file) => {
+                let mut contents = String::new();
+                if let Err(e) = file.read_to_string(&mut contents) {
+                    self.status_message = format!("Failed to read file: {}", e);
+                    log::error!("Failed to read MIDI mapping from {}: {}", path.display(), e);
+                    return;
+                }
+                match serde_json::from_str::<midi_control::MidiMapping>(&contents) {
+                    Ok(mapping) => {
+                        self.midi_mapping = mapping;
+                        self.status_message = format!("Loaded MIDI mapping from {}", path.display());
+                        log::info!("Loaded MIDI mapping from {}", path.display());
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Failed to parse MIDI mapping: {}", e);
+                        log::error!("Failed to parse MIDI mapping from {}: {}", path.display(), e);
                     }
                 }
             }
-            None => (),
+            Err(e) => {
+                self.status_message = format!("Failed to open file: {}", e);
+                log::error!("Failed to open file {}: {}", path.display(), e);
+            }
         }
     }
 
@@ -909,6 +956,35 @@ impl eframe::App for BatonApp {
 
         // Top panel with controls
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+            // Menu bar
+            ui.horizontal(|ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("Open MIDI Mapping...").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("JSON", &["json"])
+                            .set_title("Open MIDI Mapping")
+                            .pick_file()
+                        {
+                            self.load_midi_mapping_from_file(&path);
+                        }
+                        ui.close();
+                    }
+                    if ui.button("Save MIDI Mapping As...").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("JSON", &["json"])
+                            .set_title("Save MIDI Mapping")
+                            .set_file_name("midi_mapping.json")
+                            .save_file()
+                        {
+                            self.save_midi_mapping_to_file(&path);
+                        }
+                        ui.close();
+                    }
+                });
+
+                ui.separator();
+            });
+
             ui.horizontal(|ui| {
                 ui.heading("Baton Mixer");
 
