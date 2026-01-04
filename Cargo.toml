@@ -22,7 +22,7 @@ nusb = "0.2.1"
 ratatui = "0.29"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-baton-studio = { version = "0.1.0", path = "../baton_studio" }
+baton-studio = "0.1.0"
 tui-input = "0.14.0"
 alsa = "0.10.0"
 eframe = "0.33"
