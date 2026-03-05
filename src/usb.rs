@@ -49,7 +49,7 @@ impl PreSonusStudio1824c {
     pub fn new() -> Result<Self, Box<dyn Error>> {
         let device_info = nusb::list_devices()
             .wait()?
-            .find(|dev| dev.vendor_id() == 0x194f && dev.product_id() == 0x010d)
+        .find(|dev| dev.vendor_id() == 0x194f && (dev.product_id() == 0x010d || dev.product_id() == 0x0107))
             .ok_or(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "device not found",
