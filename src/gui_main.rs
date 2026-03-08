@@ -980,6 +980,10 @@ impl eframe::App for BatonApp {
                         }
                         ui.close();
                     }
+                    ui.separator();
+                    if ui.button("Exit").clicked() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
                 });
 
                 ui.separator();

@@ -526,6 +526,7 @@ pub enum StripKind {
 pub enum PanLaw {
     Simple,
     Exponential,
+    dB3,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -569,12 +570,26 @@ impl Strip {
                 }
             }
             PanLaw::Exponential => {
-                let value = self.fader - (self.balance.abs().powi(2) / 96.0);
+                let value = self.fader - ((0.2 * self.balance).abs().powi(3) / 68.0);
 
                 if self.balance < 0.0 {
                     right = value;
                 } else if self.balance > 0.0 {
                     left = value;
+                }
+            }
+            PanLaw::dB3 => {
+                let attenuation = 3.0;
+                let value = self.fader - attenuation;
+                if self.balance > 0.0 {
+                    right = value + (self.balance.abs() / 100.0) * attenuation;
+                    left = value - ((0.2 * self.balance).abs().powi(3) / 68.0);
+                } else if self.balance < 0.0 {
+                    left = value + (self.balance.abs() / 100.0) * attenuation;
+                    right = value - ((0.2 * self.balance).abs().powi(3) / 68.0);
+                } else {
+                    left = value;
+                    right = value;
                 }
             }
         }
