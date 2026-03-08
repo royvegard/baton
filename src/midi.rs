@@ -64,7 +64,10 @@ fn initialize_midi_sequencer() -> Result<seq::Seq, Box<dyn std::error::Error>> {
     Ok(seq)
 }
 
-fn run_midi_event_loop(seq: seq::Seq, sender: Sender<MidiMessage>) -> Result<(), Box<dyn std::error::Error>> {
+fn run_midi_event_loop(
+    seq: seq::Seq,
+    sender: Sender<MidiMessage>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Set up input for receiving events
     let mut input = seq.input();
 

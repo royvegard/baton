@@ -353,12 +353,17 @@ impl BatonApp {
                 match serde_json::from_str::<midi_control::MidiMapping>(&contents) {
                     Ok(mapping) => {
                         self.midi_mapping = mapping;
-                        self.status_message = format!("Loaded MIDI mapping from {}", path.display());
+                        self.status_message =
+                            format!("Loaded MIDI mapping from {}", path.display());
                         log::info!("Loaded MIDI mapping from {}", path.display());
                     }
                     Err(e) => {
                         self.status_message = format!("Failed to parse MIDI mapping: {}", e);
-                        log::error!("Failed to parse MIDI mapping from {}: {}", path.display(), e);
+                        log::error!(
+                            "Failed to parse MIDI mapping from {}: {}",
+                            path.display(),
+                            e
+                        );
                     }
                 }
             }
