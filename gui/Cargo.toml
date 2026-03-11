@@ -1,0 +1,15 @@
+[package]
+name = "gui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+backend = { path = "../backend" }
+egui = "0.33"
+eframe = "0.33"
+flexi_logger.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+dirs.workspace = true
+rfd.workspace = true

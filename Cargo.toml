@@ -1,31 +1,11 @@
-[package]
-name = "baton"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = ["backend", "gui", "tui"]
+resolver = "3"
 
-[[bin]]
-name = "baton"
-path = "src/main.rs"
-
-[[bin]]
-name = "baton-gui"
-path = "src/gui_main.rs"
-
-[profile.release]
-debug = true
-
-[dependencies]
-flexi_logger = "0.31.1"
-futures-lite = "2.6.0"
+[workspace.dependencies]
+dirs = "6.0"
+flexi_logger = "0.31"
 log = "0.4"
-nusb = "0.2.1"
-ratatui = "0.29"
+rfd = "0.15"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-baton-studio = "0.1.0"
-tui-input = "0.14.0"
-alsa = "0.10.0"
-eframe = "0.33"
-egui = "0.33"
-dirs = "6.0.0"
-rfd = "0.15"

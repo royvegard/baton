@@ -6,10 +6,6 @@ pub struct Pan {
 }
 
 impl Pan {
-    pub fn balance(&mut self, value: i64) {
-        self.balance = value;
-    }
-
     fn render_pan(&self, area: Rect, buf: &mut Buffer) {
         if area.is_empty() {
             return;

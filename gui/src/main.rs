@@ -1,4 +1,5 @@
 // src/gui_main.rs
+use backend::*;
 use eframe::egui;
 use flexi_logger::{FileSpec, detailed_format};
 use std::{
@@ -8,10 +9,6 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-
-mod midi;
-mod midi_control;
-mod usb;
 
 enum StripAction {
     None,

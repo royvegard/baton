@@ -1,3 +1,6 @@
+use backend::midi_control::*;
+use backend::usb::*;
+use backend::*;
 use flexi_logger::{FileSpec, detailed_format};
 use pan::Pan;
 use ratatui::{
@@ -17,14 +20,8 @@ use std::{
 use std::{io, path::Path};
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
-use usb::StripKind;
 
-use crate::midi_control::{GlobalControl, StripTarget};
-
-mod midi;
-mod midi_control;
 mod pan;
-mod usb;
 
 fn main() -> io::Result<()> {
     let _logger = flexi_logger::Logger::try_with_env()
