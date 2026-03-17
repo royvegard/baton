@@ -12,4 +12,4 @@ log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 dirs.workspace = true
-rfd.workspace = true
+rfd = "0.15"

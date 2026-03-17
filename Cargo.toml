@@ -6,6 +6,5 @@ resolver = "3"
 dirs = "6.0"
 flexi_logger = "0.31"
 log = "0.4"
-rfd = "0.15"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
