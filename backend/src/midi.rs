@@ -77,24 +77,21 @@ fn run_midi_event_loop(
         if let Ok(event) = input.event_input() {
             let event_type = event.get_type();
 
-            match event_type {
-                EventType::Controller => {
-                    // Control Change - use EvCtrl to extract structured data
-                    if let Some(ctrl_data) = event.get_data::<EvCtrl>() {
-                        sender.send(MidiMessage::ControlChange {
-                            channel: ctrl_data.channel,
-                            controller: ctrl_data.param as u8,
-                            value: ctrl_data.value as u8,
-                        })?;
-                        log::debug!(
-                            "MIDI CC: ch={}, cc={}, val={}",
-                            ctrl_data.channel,
-                            ctrl_data.param,
-                            ctrl_data.value
-                        );
-                    }
+            if event_type == EventType::Controller {
+                // Control Change - use EvCtrl to extract structured data
+                if let Some(ctrl_data) = event.get_data::<EvCtrl>() {
+                    sender.send(MidiMessage::ControlChange {
+                        channel: ctrl_data.channel,
+                        controller: ctrl_data.param as u8,
+                        value: ctrl_data.value as u8,
+                    })?;
+                    log::debug!(
+                        "MIDI CC: ch={}, cc={}, val={}",
+                        ctrl_data.channel,
+                        ctrl_data.param,
+                        ctrl_data.value
+                    );
                 }
-                _ => {}
             }
         }
     }

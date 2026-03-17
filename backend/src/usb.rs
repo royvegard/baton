@@ -270,8 +270,7 @@ impl PreSonusStudio1824c {
                     channel_index += 1;
                 }
 
-                let mut bus_index = 0;
-                for v in self.state.bus.iter().map(|g| gain_to_db(*g)) {
+                for (bus_index, v) in self.state.bus.iter().map(|g| gain_to_db(*g)).enumerate() {
                     self.bus_meters[bus_index].value = v;
                     if v > self.bus_meters[bus_index].max {
                         self.bus_meters[bus_index].max = v;
@@ -279,7 +278,6 @@ impl PreSonusStudio1824c {
                     if self.bus_meters[bus_index].value > -0.001 {
                         self.bus_meters[bus_index].clip = true;
                     }
-                    bus_index += 1;
                 }
 
                 // synch button states

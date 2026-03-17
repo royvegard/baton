@@ -81,13 +81,12 @@ impl BatonApp {
 
         // Initialize config directory
         let mut config_dir = dirs::config_dir().map(|d| d.join("baton"));
-        if let Some(ref dir) = config_dir {
-            if !dir.exists() {
-                if let Err(e) = std::fs::create_dir_all(dir) {
-                    log::warn!("Failed to create config directory {}: {}", dir.display(), e);
-                    config_dir = None;
-                }
-            }
+        if let Some(ref dir) = config_dir
+            && !dir.exists()
+            && let Err(e) = std::fs::create_dir_all(dir)
+        {
+            log::warn!("Failed to create config directory {}: {}", dir.display(), e);
+            config_dir = None;
         }
 
         let ps = Arc::new(Mutex::new(
@@ -96,38 +95,35 @@ impl BatonApp {
 
         // Load config
         let mut midi_mapping = midi_control::MidiMapping::create_default();
-        match config_dir {
-            Some(ref dir) => {
-                let config_file = dir.join("config.json");
-                if let Ok(mut file) = File::open(&config_file) {
-                    let mut serialized = String::new();
-                    if file.read_to_string(&mut serialized).is_ok() {
-                        let mut ps_lock = ps.lock().unwrap();
-                        ps_lock.load_config(&serialized);
-                        ps_lock.write_state();
-                    }
+        if let Some(ref dir) = config_dir {
+            let config_file = dir.join("config.json");
+            if let Ok(mut file) = File::open(&config_file) {
+                let mut serialized = String::new();
+                if file.read_to_string(&mut serialized).is_ok() {
+                    let mut ps_lock = ps.lock().unwrap();
+                    ps_lock.load_config(&serialized);
+                    ps_lock.write_state();
                 }
+            }
 
-                // Load MIDI mapping
-                let midi_mapping_file = dir.join("midi_mapping.json");
-                if let Ok(mut file) = File::open(&midi_mapping_file) {
-                    let mut contents = String::new();
-                    file.read_to_string(&mut contents).ok();
-                    match serde_json::from_str(&contents) {
-                        Ok(mapping) => {
-                            midi_mapping = mapping;
-                        }
-                        Err(e) => {
-                            log::warn!(
-                                "Failed to parse MIDI mapping from {}: {}",
-                                midi_mapping_file.display(),
-                                e
-                            );
-                        }
+            // Load MIDI mapping
+            let midi_mapping_file = dir.join("midi_mapping.json");
+            if let Ok(mut file) = File::open(&midi_mapping_file) {
+                let mut contents = String::new();
+                file.read_to_string(&mut contents).ok();
+                match serde_json::from_str(&contents) {
+                    Ok(mapping) => {
+                        midi_mapping = mapping;
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "Failed to parse MIDI mapping from {}: {}",
+                            midi_mapping_file.display(),
+                            e
+                        );
                     }
                 }
             }
-            None => (),
         }
 
         Self {
@@ -304,12 +300,9 @@ impl BatonApp {
     }
 
     fn save_midi_mapping(&mut self) {
-        match self.config_dir {
-            Some(ref dir) => {
-                let midi_mapping_file = dir.join("midi_mapping.json");
-                self.save_midi_mapping_to_file(&midi_mapping_file);
-            }
-            None => (),
+        if let Some(ref dir) = self.config_dir {
+            let midi_mapping_file = dir.join("midi_mapping.json");
+            self.save_midi_mapping_to_file(&midi_mapping_file);
         }
     }
 
@@ -816,10 +809,10 @@ impl BatonApp {
                 draw_single_meter(painter, left_meter_rect, meter_value, "L");
 
                 // Draw right meter if stereo
-                if let Some(right_val) = meter_value_right {
-                    if let Some(right_rect) = right_meter_rect {
-                        draw_single_meter(painter, right_rect, right_val, "R");
-                    }
+                if let Some(right_val) = meter_value_right
+                    && let Some(right_rect) = right_meter_rect
+                {
+                    draw_single_meter(painter, right_rect, right_val, "R");
                 }
 
                 // Draw fader cap
@@ -934,14 +927,13 @@ impl BatonApp {
 impl eframe::App for BatonApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Check for MIDI learn timeout (5 seconds)
-        if self.midi_learn_state != midi_control::MidiLearnState::Inactive {
-            if let Some(start_time) = self.midi_learn_start_time {
-                if start_time.elapsed() >= Duration::from_secs(5) {
-                    self.midi_learn_state = midi_control::MidiLearnState::Inactive;
-                    self.midi_learn_start_time = None;
-                    self.status_message = "MIDI Learn: Timed out after 5 seconds".to_string();
-                }
-            }
+        if self.midi_learn_state != midi_control::MidiLearnState::Inactive
+            && let Some(start_time) = self.midi_learn_start_time
+            && start_time.elapsed() >= Duration::from_secs(5)
+        {
+            self.midi_learn_state = midi_control::MidiLearnState::Inactive;
+            self.midi_learn_start_time = None;
+            self.status_message = "MIDI Learn: Timed out after 5 seconds".to_string();
         }
 
         // Poll device state periodically
@@ -1319,20 +1311,17 @@ impl eframe::App for BatonApp {
         log::info!("Saving configuration...");
 
         // Save config
-        match self.config_dir {
-            Some(ref dir) => {
-                let config_file = dir.join("config.json");
+        if let Some(ref dir) = self.config_dir {
+            let config_file = dir.join("config.json");
+            {
+                let ps = self.ps.lock().unwrap();
+                if let Ok(serialized) = serde_json::to_string_pretty(&*ps)
+                    && let Ok(mut file) = File::create(&config_file)
                 {
-                    let ps = self.ps.lock().unwrap();
-                    if let Ok(serialized) = serde_json::to_string_pretty(&*ps) {
-                        if let Ok(mut file) = File::create(&config_file) {
-                            let _ = file.write_all(serialized.as_bytes());
-                            let _ = file.flush();
-                        }
-                    }
+                    let _ = file.write_all(serialized.as_bytes());
+                    let _ = file.flush();
                 }
             }
-            None => (),
         };
 
         // Save MIDI mapping

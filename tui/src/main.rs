@@ -285,11 +285,11 @@ impl App {
         };
 
         self.midi_mapping.sort_mappings();
-        if let Ok(json) = serde_json::to_string_pretty(&self.midi_mapping) {
-            if let Ok(mut file) = File::create(&midi_mapping_file) {
-                let _ = file.write_all(json.as_bytes());
-                let _ = file.flush();
-            }
+        if let Ok(json) = serde_json::to_string_pretty(&self.midi_mapping)
+            && let Ok(mut file) = File::create(&midi_mapping_file)
+        {
+            let _ = file.write_all(json.as_bytes());
+            let _ = file.flush();
         }
     }
 
@@ -793,7 +793,7 @@ impl App {
 
     fn increment_strip_width(&mut self, delta: i16) {
         let mut w = ((self.strip_width as i16 + delta).clamp(1, 15)) as u16;
-        if w % 2 == 0 {
+        if w.is_multiple_of(2) {
             w += 1;
         }
         self.strip_width = w;

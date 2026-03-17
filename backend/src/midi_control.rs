@@ -139,10 +139,10 @@ impl MidiMapping {
 
     /// Transform MIDI value (0-127) to target range
     pub fn transform_value(&self, midi: &MidiControl, midi_value: u8) -> f64 {
-        if let Some(entry) = self.mappings.iter().find(|e| &e.midi == midi) {
-            if let Some(range) = &entry.value_range {
-                return range.transform(midi_value);
-            }
+        if let Some(entry) = self.mappings.iter().find(|e| &e.midi == midi)
+            && let Some(range) = &entry.value_range
+        {
+            return range.transform(midi_value);
         }
         // Default: map 0-127
         midi_value as f64
