@@ -415,35 +415,35 @@ impl App {
         if self.ps.state.phantom == 0x01 {
             phantom = phantom.style(Style::new().bold().black().on_blue());
         } else {
-            phantom = phantom.style(Style::new().reset());
+            phantom = phantom.style(Style::reset());
         }
 
         let mut line: Span = Span::from("l: 1-2 Line");
         if self.ps.state.line == 0x01 {
             line = line.style(Style::new().bold().black().on_blue());
         } else {
-            line = line.style(Style::new().reset());
+            line = line.style(Style::reset());
         }
 
         let mut mute: Span = Span::from("u: Mute");
         if self.ps.state.mute == 0x01 {
             mute = mute.style(Style::new().bold().black().on_red());
         } else {
-            mute = mute.style(Style::new().reset());
+            mute = mute.style(Style::reset());
         }
 
         let mut mono: Span = Span::from("o: Mono");
         if self.ps.state.mono == 0x01 {
             mono = mono.style(Style::new().bold().black().on_yellow());
         } else {
-            mono = mono.style(Style::new().reset());
+            mono = mono.style(Style::reset());
         }
 
         let mut bypass: Span = Span::from("b: Bypass");
         if self.bypass {
             bypass = bypass.style(Style::new().bold().black().on_light_blue());
         } else {
-            bypass = bypass.style(Style::new().reset());
+            bypass = bypass.style(Style::reset());
         }
 
         let state_line = Line::from(vec![

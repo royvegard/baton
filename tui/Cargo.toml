@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ratatui = "0.29"
-tui-input = "0.14"
+ratatui = "0.30"
+tui-input = "0.15"
 backend = { path = "../backend" }
 flexi_logger.workspace = true
 log.workspace = true

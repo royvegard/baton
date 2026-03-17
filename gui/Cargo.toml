@@ -7,9 +7,9 @@ edition = "2024"
 backend = { path = "../backend" }
 egui = "0.33"
 eframe = "0.33"
+rfd = "0.17"
 flexi_logger.workspace = true
 log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 dirs.workspace = true
-rfd = "0.15"
