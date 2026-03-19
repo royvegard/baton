@@ -380,23 +380,6 @@ impl App {
         .spacing(0)
         .areas(frame.area());
 
-        // Compose status text
-        let active_strip = self.ps.mixes[self.active_mix_index]
-            .strips
-            .iter()
-            .nth(self.active_strip_index)
-            .unwrap();
-        let name = if self.active_strip_index < self.ps.channel_names.len() {
-            self.ps.channel_names[self.active_strip_index].as_str()
-        } else {
-            &self.ps.mixes[self.active_mix_index].name
-        };
-        let meter_value = if self.active_strip_index < self.ps.channel_meters.len() {
-            self.ps.channel_meters[self.active_strip_index].value
-        } else {
-            self.ps.bus_meters[self.active_mix_index * 2].value
-        };
-
         let status_line = Line::from(self.status_line.as_str()).left_aligned();
 
         // Autoscroll left and right
