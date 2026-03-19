@@ -62,7 +62,6 @@ struct BatonApp {
     status_message: String,
     clip_indicators: HashMap<String, Instant>, // Track clip times by meter ID
     peak_holds: HashMap<String, (f64, Instant)>, // Track peak values and times by meter ID
-    meter_averages: HashMap<String, Vec<(f64, Instant)>>, // Track meter history for running average
     strip_colors: HashMap<String, egui::Color32>, // Track custom colors by strip ID (mix_index:strip_index)
 }
 
@@ -141,7 +140,6 @@ impl BatonApp {
             status_message: String::new(),
             clip_indicators: HashMap::new(),
             peak_holds: HashMap::new(),
-            meter_averages: HashMap::new(),
             strip_colors: HashMap::new(),
         }
     }
@@ -373,7 +371,6 @@ impl BatonApp {
         available_height: f32,
         clip_indicators: &mut HashMap<String, Instant>,
         peak_holds: &mut HashMap<String, (f64, Instant)>,
-        meter_averages: &mut HashMap<String, Vec<(f64, Instant)>>,
         meter_id: &str,
         custom_color: Option<egui::Color32>,
     ) -> StripAction {
@@ -646,7 +643,7 @@ impl BatonApp {
                 // Check for clipping (meter value above -0.1 dB) and update peak holds
                 let clip_threshold = -0.1;
                 let now = Instant::now();
-                let peak_hold_duration = Duration::from_millis(500);
+                let peak_hold_duration = Duration::from_millis(2000);
 
                 // Update left/mono peak hold
                 let left_key = format!("{}_L", meter_id);
@@ -660,13 +657,6 @@ impl BatonApp {
                 if meter_value > clip_threshold {
                     clip_indicators.insert(left_key.clone(), now);
                 }
-
-                // Update running average for left/mono channel
-                let avg_duration = Duration::from_secs(3);
-                let left_history = meter_averages.entry(left_key.clone()).or_default();
-                left_history.push((meter_value, now));
-                // Remove values older than 3 seconds
-                left_history.retain(|(_, time)| now.duration_since(*time) < avg_duration);
 
                 // Update right peak hold if stereo
                 if let Some(right_val) = meter_value_right {
@@ -682,12 +672,6 @@ impl BatonApp {
                     if right_val > clip_threshold {
                         clip_indicators.insert(right_key.clone(), now);
                     }
-
-                    // Update running average for right channel
-                    let right_history = meter_averages.entry(right_key.clone()).or_default();
-                    right_history.push((right_val, now));
-                    // Remove values older than 3 seconds
-                    right_history.retain(|(_, time)| now.duration_since(*time) < avg_duration);
                 }
 
                 // Clear clip indicators if meter was clicked or double-clicked
@@ -782,26 +766,6 @@ impl BatonApp {
                                 ],
                                 egui::Stroke::new(2.0, egui::Color32::WHITE),
                             );
-                        }
-
-                        // Draw running average line
-                        let avg_key = format!("{}_{}", meter_id, channel_suffix);
-                        let history = meter_averages.get(&avg_key);
-                        if let Some(history) = history.filter(|h| !h.is_empty()) {
-                            let avg_val = history.iter().map(|(val, _)| val).sum::<f64>()
-                                / history.len() as f64;
-                            if avg_val > -50.0 && avg_val < 10.0 {
-                                let avg_normalized = (avg_val + 50.0) / 60.0;
-                                let avg_y = meter_rect.max.y
-                                    - (avg_normalized * fader_height as f64) as f32;
-                                painter.line_segment(
-                                    [
-                                        egui::pos2(meter_rect.min.x, avg_y),
-                                        egui::pos2(meter_rect.max.x, avg_y),
-                                    ],
-                                    egui::Stroke::new(4.0, egui::Color32::from_rgb(79, 0, 255)),
-                                );
-                            }
                         }
                     };
 
@@ -1163,7 +1127,6 @@ impl eframe::App for BatonApp {
                     available_height,
                     &mut self.clip_indicators,
                     &mut self.peak_holds,
-                    &mut self.meter_averages,
                     &meter_id,
                     custom_color,
                 );
@@ -1207,7 +1170,6 @@ impl eframe::App for BatonApp {
                             available_height,
                             &mut self.clip_indicators,
                             &mut self.peak_holds,
-                            &mut self.meter_averages,
                             &meter_id,
                             custom_color,
                         );
