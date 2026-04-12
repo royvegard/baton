@@ -889,8 +889,9 @@ impl BatonApp {
 }
 
 impl eframe::App for BatonApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Check for MIDI learn timeout (5 seconds)
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx();
+
         if self.midi_learn_state != midi_control::MidiLearnState::Inactive
             && let Some(start_time) = self.midi_learn_start_time
             && start_time.elapsed() >= Duration::from_secs(5)
@@ -913,7 +914,7 @@ impl eframe::App for BatonApp {
         ctx.request_repaint_after(self.tick_rate);
 
         // Top panel with controls
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+        egui::TopBottomPanel::top("top_panel").show(ui, |ui| {
             // Menu bar
             ui.horizontal(|ui| {
                 ui.menu_button("File", |ui| {
@@ -1269,7 +1270,7 @@ impl eframe::App for BatonApp {
         }
     }
 
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+    fn on_exit(&mut self) {
         log::info!("Saving configuration...");
 
         // Save config
