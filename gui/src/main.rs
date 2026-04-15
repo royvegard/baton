@@ -890,8 +890,6 @@ impl BatonApp {
 
 impl eframe::App for BatonApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let ctx = ui.ctx();
-
         if self.midi_learn_state != midi_control::MidiLearnState::Inactive
             && let Some(start_time) = self.midi_learn_start_time
             && start_time.elapsed() >= Duration::from_secs(5)
@@ -911,10 +909,10 @@ impl eframe::App for BatonApp {
         }
 
         // Request repaint to keep UI responsive
-        ctx.request_repaint_after(self.tick_rate);
+        ui.ctx().request_repaint_after(self.tick_rate);
 
         // Top panel with controls
-        egui::TopBottomPanel::top("top_panel").show(ui, |ui| {
+        egui::Panel::top("top_panel").show_inside(ui, |ui| {
             // Menu bar
             ui.horizontal(|ui| {
                 ui.menu_button("File", |ui| {
@@ -941,11 +939,13 @@ impl eframe::App for BatonApp {
                     }
                     ui.separator();
                     if ui.button("Exit").clicked() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
 
                 ui.separator();
+
+                egui::widgets::global_theme_preference_switch(ui);
             });
 
             ui.horizontal(|ui| {
@@ -1087,7 +1087,7 @@ impl eframe::App for BatonApp {
         });
 
         // Status bar
-        egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
+        egui::Panel::bottom("bottom_panel").show_inside(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(&self.status_message);
             });
@@ -1095,9 +1095,9 @@ impl eframe::App for BatonApp {
 
         let mut strip_actions = Vec::new();
 
-        egui::SidePanel::right("right_panel")
+        egui::Panel::right("right_panel")
             .resizable(false)
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 // Align with channel strips
                 ui.add_space(6.0);
                 let available_height = ui.available_height() - 6.0;
@@ -1137,7 +1137,7 @@ impl eframe::App for BatonApp {
             });
 
         // Central panel with strips
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             // Get available height for strips
             let available_height = ui.available_height();
 
