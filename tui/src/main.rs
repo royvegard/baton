@@ -48,6 +48,12 @@ enum InputMode {
     Command,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StatusLineMode {
+    Fader,
+    Message,
+}
+
 pub struct App {
     exit: bool,
     active_mix_index: usize,
@@ -56,6 +62,7 @@ pub struct App {
     strip_width: u16,
     meter_heigth: u16,
     status_line: String,
+    status_line_state: StatusLineMode,
     ps: usb::PreSonusStudio1824c,
     tick_rate: Duration,
     last_tick: Instant,
@@ -103,6 +110,7 @@ impl App {
             strip_width: 5,
             meter_heigth: 20,
             status_line: String::with_capacity(256),
+            status_line_state: StatusLineMode::Fader,
             ps: usb::PreSonusStudio1824c::new().expect("Failed to open device"),
             last_tick: Instant::now(),
             tick_rate: Duration::from_millis(100),
@@ -182,6 +190,24 @@ impl App {
 
     fn on_tick(&mut self) {
         self.ps.poll_state();
+
+        if self.status_line_state == StatusLineMode::Fader {
+            let channel_name = if (self.active_strip_index) < self.ps.channel_names.len() {
+                format!(".{}", &self.ps.channel_names[self.active_strip_index])
+            } else {
+                "".to_string()
+            };
+            self.status_line = format!(
+                "{}{}: Fader {:.1} | Balance {:.0} | Mute {} | Solo {}",
+                self.ps.mixes[self.active_mix_index].name,
+                channel_name,
+                self.ps.mixes[self.active_mix_index].strips.iter().nth(self.active_strip_index).unwrap().fader,
+                self.ps.mixes[self.active_mix_index].strips.iter().nth(self.active_strip_index).unwrap().balance,
+                if self.ps.mixes[self.active_mix_index].strips.iter().nth(self.active_strip_index).unwrap().mute { "On" } else { "Off" },
+                if self.ps.mixes[self.active_mix_index].strips.iter().nth(self.active_strip_index).unwrap().solo { "On" } else { "Off" },
+            )
+        }
+
         self.process_midi_messages();
     }
 
@@ -194,7 +220,8 @@ impl App {
         });
 
         self.midi_learn_state = self.midi_mapping.start_learning(target);
-        self.status_line = format!("MIDI Learn: Move a control to assign to {:?}", control);
+        self.status_line_state = StatusLineMode::Message;
+        self.status_line = format!("MIDI Learn: Move a control to assign to {:?}. Esc to cancel.", control);
     }
 
     fn process_midi_messages(&mut self) {
@@ -244,6 +271,7 @@ impl App {
                                 channel, controller
                             );
                             self.midi_learn_state = midi_control::MidiLearnState::Inactive;
+                            self.status_line_state = StatusLineMode::Fader;
 
                             // Save the mapping
                             self.save_midi_mapping();
@@ -673,6 +701,7 @@ impl App {
                 if self.midi_learn_state != midi_control::MidiLearnState::Inactive {
                     self.midi_learn_state = midi_control::MidiLearnState::Inactive;
                     self.status_line = "MIDI Learn cancelled".to_string();
+                    self.status_line_state = StatusLineMode::Fader;
                 }
             }
             KeyCode::Char('r') => self.start_editing(InputMode::Rename),
@@ -783,6 +812,10 @@ impl App {
     }
 
     fn increment_balance(&mut self, delta: f64) {
+        if self.active_strip_index >= self.ps.mixes[self.active_mix_index].strips.channel_strips.len() {
+            return;
+        }
+
         let strip = &mut self.ps.mixes[self.active_mix_index].strips.channel_strips
             [self.active_strip_index];
         strip.balance = (strip.balance + delta).clamp(-100.0, 100.0);
@@ -791,6 +824,10 @@ impl App {
     }
 
     fn center_balance(&mut self) {
+        if self.active_strip_index >= self.ps.mixes[self.active_mix_index].strips.channel_strips.len() {
+            return;
+        }
+
         let strip = &mut self.ps.mixes[self.active_mix_index].strips.channel_strips
             [self.active_strip_index];
         strip.balance = 0.0;
