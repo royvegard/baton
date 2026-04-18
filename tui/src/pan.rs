@@ -40,27 +40,26 @@ impl Pan {
             "🭵", // Rightmost
         ];
 
-        for y in area.top()..area.bottom() {
-            for x in area.left()..area.left() + width {
-                let relative_x = x - area.left();
+        let y = area.top();
+        for x in area.left()..area.left() + width {
+            let relative_x = x - area.left();
 
-                if relative_x == char_position {
-                    // Position indicator with sub-character precision
-                    buf[(x, y)].set_symbol(bars[sub_position]);
-                } else {
-                    // Background line
-                    buf[(x, y)].set_symbol("─");
-                }
+            if relative_x == char_position {
+                // Position indicator with sub-character precision
+                buf[(x, y)].set_symbol(bars[sub_position]);
+            } else {
+                // Background line
+                buf[(x, y)].set_symbol("─");
             }
         }
 
         // Special indicators for extremes and center
         if self.balance == 0 {
-            buf[(center, area.top())].set_symbol("█");
+            buf[(center, y)].set_symbol("█");
         } else if self.balance <= -100 {
-            buf[(area.left(), area.top())].set_symbol("◀");
+            buf[(area.left(), y)].set_symbol("◀");
         } else if self.balance >= 100 {
-            buf[(area.left() + width - 1, area.top())].set_symbol("▶");
+            buf[(area.left() + width - 1, y)].set_symbol("▶");
         }
     }
 }
