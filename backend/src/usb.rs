@@ -446,7 +446,7 @@ impl PreSonusStudio1824c {
         for m in 0..9 {
             daw_channel_left += 2;
             daw_channel_right = daw_channel_left + 1;
-            for c in 0..35 {
+            for c in 0..=35 {
                 if c == daw_channel_left {
                     match self
                         .command
