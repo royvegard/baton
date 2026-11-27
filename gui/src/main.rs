@@ -1,9 +1,10 @@
 // src/gui_main.rs
 use backend::*;
 use eframe::egui;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use flexi_logger::{FileSpec, detailed_format};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fs::File,
     io::{Read, Write},
     sync::{Arc, Mutex},
@@ -34,7 +35,9 @@ fn main() -> eframe::Result {
 
     log::info!("Starting Baton GUI");
 
-    let initial_size = load_window_size().unwrap_or([1200.0, 800.0]);
+    let initial_size = Settings::load(config_dir_path().as_deref())
+        .initial_window_size()
+        .unwrap_or([1200.0, 800.0]);
 
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Glow,
@@ -51,18 +54,81 @@ fn main() -> eframe::Result {
     )
 }
 
-fn window_file() -> Option<std::path::PathBuf> {
-    dirs::config_dir().map(|d| d.join("baton").join("window.json"))
+fn config_dir_path() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|d| d.join("baton"))
 }
 
-/// Last window size saved on exit, clamped to the minimum window size.
-fn load_window_size() -> Option<[f32; 2]> {
-    let contents = std::fs::read_to_string(window_file()?).ok()?;
-    let [w, h]: [f32; 2] = serde_json::from_str(&contents).ok()?;
-    if !w.is_finite() || !h.is_finite() {
-        return None;
+/// GUI preferences, stored together in settings.json.
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+struct Settings {
+    /// Channel strip indices hidden from the view.
+    hidden_channels: BTreeSet<usize>,
+    /// Toolbar button keys the user has turned off.
+    hidden_toolbar: BTreeSet<String>,
+    /// Inner window size at the last exit.
+    window_size: Option<[f32; 2]>,
+}
+
+impl Settings {
+    const FILE: &'static str = "settings.json";
+    /// Files that older versions used, one per setting.
+    const LEGACY_FILES: [&'static str; 3] = ["view.json", "toolbar.json", "window.json"];
+
+    fn load(dir: Option<&std::path::Path>) -> Self {
+        let Some(dir) = dir else {
+            return Self::default();
+        };
+        match std::fs::read_to_string(dir.join(Self::FILE)) {
+            Ok(contents) => serde_json::from_str(&contents).unwrap_or_else(|e| {
+                log::warn!("Failed to parse {}: {}", Self::FILE, e);
+                Self::default()
+            }),
+            Err(_) => Self::migrate_legacy(dir),
+        }
     }
-    Some([w.max(MIN_WINDOW_WIDTH), h.max(MIN_WINDOW_HEIGHT)])
+
+    /// Reads the separate files from older versions, writes settings.json
+    /// and removes the old files.
+    fn migrate_legacy(dir: &std::path::Path) -> Self {
+        fn read<T: DeserializeOwned>(dir: &std::path::Path, name: &str) -> Option<T> {
+            serde_json::from_str(&std::fs::read_to_string(dir.join(name)).ok()?).ok()
+        }
+
+        if !Self::LEGACY_FILES.iter().any(|f| dir.join(f).exists()) {
+            return Self::default();
+        }
+
+        let settings = Self {
+            hidden_channels: read(dir, "view.json").unwrap_or_default(),
+            hidden_toolbar: read(dir, "toolbar.json").unwrap_or_default(),
+            window_size: read(dir, "window.json"),
+        };
+
+        match settings.save(dir) {
+            Ok(()) => {
+                for f in Self::LEGACY_FILES {
+                    let _ = std::fs::remove_file(dir.join(f));
+                }
+                log::info!("Migrated settings to {}", Self::FILE);
+            }
+            Err(e) => log::warn!("Failed to migrate settings: {}", e),
+        }
+        settings
+    }
+
+    fn save(&self, dir: &std::path::Path) -> std::io::Result<()> {
+        std::fs::write(dir.join(Self::FILE), serde_json::to_string_pretty(self)?)
+    }
+
+    /// Saved window size, clamped to the minimum window size.
+    fn initial_window_size(&self) -> Option<[f32; 2]> {
+        let [w, h] = self.window_size?;
+        if !w.is_finite() || !h.is_finite() {
+            return None;
+        }
+        Some([w.max(MIN_WINDOW_WIDTH), h.max(MIN_WINDOW_HEIGHT)])
+    }
 }
 
 struct BatonApp {
@@ -226,17 +292,7 @@ impl BatonApp {
             }
         }
 
-        let hidden_channels = config_dir
-            .as_ref()
-            .and_then(|d| std::fs::read_to_string(d.join("view.json")).ok())
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
-
-        let hidden_toolbar = config_dir
-            .as_ref()
-            .and_then(|d| std::fs::read_to_string(d.join("toolbar.json")).ok())
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
+        let settings = Settings::load(config_dir.as_deref());
 
         Self {
             ps,
@@ -254,26 +310,23 @@ impl BatonApp {
             clip_indicators: HashMap::new(),
             peak_holds: HashMap::new(),
             strip_colors: HashMap::new(),
-            hidden_channels,
-            hidden_toolbar,
+            hidden_channels: settings.hidden_channels.into_iter().collect(),
+            hidden_toolbar: settings.hidden_toolbar.into_iter().collect(),
             last_min_width: 0.0,
-            window_size: None,
+            window_size: settings.window_size,
         }
     }
 
-    fn save_view(&self) {
-        if let Some(ref dir) = self.config_dir
-            && let Ok(s) = serde_json::to_string(&self.hidden_channels)
-        {
-            let _ = std::fs::write(dir.join("view.json"), s);
-        }
-    }
-
-    fn save_toolbar(&self) {
-        if let Some(ref dir) = self.config_dir
-            && let Ok(s) = serde_json::to_string(&self.hidden_toolbar)
-        {
-            let _ = std::fs::write(dir.join("toolbar.json"), s);
+    fn save_settings(&self) {
+        if let Some(ref dir) = self.config_dir {
+            let settings = Settings {
+                hidden_channels: self.hidden_channels.iter().copied().collect(),
+                hidden_toolbar: self.hidden_toolbar.iter().cloned().collect(),
+                window_size: self.window_size,
+            };
+            if let Err(e) = settings.save(dir) {
+                log::warn!("Failed to save {}: {}", Settings::FILE, e);
+            }
         }
     }
 
@@ -1145,7 +1198,7 @@ impl eframe::App for BatonApp {
                         }
                     });
                     if self.hidden_channels != before {
-                        self.save_view();
+                        self.save_settings();
                     }
 
                     ui.separator();
@@ -1162,7 +1215,7 @@ impl eframe::App for BatonApp {
                         }
                     }
                     if self.hidden_toolbar != toolbar_before {
-                        self.save_toolbar();
+                        self.save_settings();
                     }
                 });
 
@@ -1530,7 +1583,7 @@ impl eframe::App for BatonApp {
                 }
                 StripAction::HideChannel => {
                     self.hidden_channels.insert(strip_index);
-                    self.save_view();
+                    self.save_settings();
                     self.status_message =
                         "Channel hidden - restore it from the View menu".to_string();
                 }
@@ -1556,12 +1609,8 @@ impl eframe::App for BatonApp {
             }
         };
 
-        // Save window size
-        if let (Some(size), Some(path)) = (self.window_size, window_file())
-            && let Ok(json) = serde_json::to_string(&size)
-        {
-            let _ = std::fs::write(path, json);
-        }
+        // Save view, toolbar and window size
+        self.save_settings();
 
         // Save MIDI mapping
         self.save_midi_mapping();
