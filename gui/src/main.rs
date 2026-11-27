@@ -3,7 +3,7 @@ use backend::*;
 use eframe::egui;
 use flexi_logger::{FileSpec, detailed_format};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::File,
     io::{Read, Write},
     sync::{Arc, Mutex},
@@ -20,6 +20,7 @@ enum StripAction {
     StartMidiLearnSolo,
     NameChanged(String),
     ColorChanged(egui::Color32),
+    HideChannel,
 }
 
 fn main() -> eframe::Result {
@@ -33,10 +34,13 @@ fn main() -> eframe::Result {
 
     log::info!("Starting Baton GUI");
 
+    let initial_size = load_window_size().unwrap_or([1200.0, 800.0]);
+
     let options = eframe::NativeOptions {
+        renderer: eframe::Renderer::Glow,
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1200.0, 800.0])
-            .with_min_inner_size([800.0, 600.0]),
+            .with_inner_size(initial_size)
+            .with_min_inner_size([MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT]),
         ..Default::default()
     };
 
@@ -45,6 +49,20 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| Ok(Box::new(BatonApp::new(cc)))),
     )
+}
+
+fn window_file() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|d| d.join("baton").join("window.json"))
+}
+
+/// Last window size saved on exit, clamped to the minimum window size.
+fn load_window_size() -> Option<[f32; 2]> {
+    let contents = std::fs::read_to_string(window_file()?).ok()?;
+    let [w, h]: [f32; 2] = serde_json::from_str(&contents).ok()?;
+    if !w.is_finite() || !h.is_finite() {
+        return None;
+    }
+    Some([w.max(MIN_WINDOW_WIDTH), h.max(MIN_WINDOW_HEIGHT)])
 }
 
 struct BatonApp {
@@ -63,7 +81,90 @@ struct BatonApp {
     clip_indicators: HashMap<String, Instant>, // Track clip times by meter ID
     peak_holds: HashMap<String, (f64, Instant)>, // Track peak values and times by meter ID
     strip_colors: HashMap<String, egui::Color32>, // Track custom colors by strip ID (mix_index:strip_index)
+    hidden_channels: HashSet<usize>, // Channel strip indices hidden from the view
+    hidden_toolbar: HashSet<String>, // Toolbar button keys the user has turned off
+    last_min_width: f32,             // Last minimum window width sent to the viewport
+    window_size: Option<[f32; 2]>,   // Most recent inner window size, saved on exit
 }
+
+/// Buttons in the top toolbar that can be hidden from the View menu.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ToolbarItem {
+    Phantom,
+    Line12,
+    Mute,
+    Mono,
+    Bypass,
+    ResetSolo,
+    ResetMute,
+}
+
+impl ToolbarItem {
+    /// Order shown in the View menu.
+    const ALL: [ToolbarItem; 7] = [
+        ToolbarItem::Phantom,
+        ToolbarItem::Line12,
+        ToolbarItem::Mute,
+        ToolbarItem::Mono,
+        ToolbarItem::Bypass,
+        ToolbarItem::ResetSolo,
+        ToolbarItem::ResetMute,
+    ];
+
+    /// Most important first: when the window is too narrow, buttons are dropped
+    /// from the end of this list.
+    const BY_PRIORITY: [ToolbarItem; 7] = [
+        ToolbarItem::Mute,
+        ToolbarItem::Phantom,
+        ToolbarItem::Mono,
+        ToolbarItem::Line12,
+        ToolbarItem::Bypass,
+        ToolbarItem::ResetMute,
+        ToolbarItem::ResetSolo,
+    ];
+
+    fn key(self) -> &'static str {
+        match self {
+            ToolbarItem::Phantom => "48v",
+            ToolbarItem::Line12 => "line_1_2",
+            ToolbarItem::Mute => "mute",
+            ToolbarItem::Mono => "mono",
+            ToolbarItem::Bypass => "bypass",
+            ToolbarItem::ResetSolo => "reset_solo",
+            ToolbarItem::ResetMute => "reset_mute",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            ToolbarItem::Phantom => "48V",
+            ToolbarItem::Line12 => "1-2 Line",
+            ToolbarItem::Mute => "Mute",
+            ToolbarItem::Mono => "Mono",
+            ToolbarItem::Bypass => "Bypass",
+            ToolbarItem::ResetSolo => "Reset solo",
+            ToolbarItem::ResetMute => "Reset mute",
+        }
+    }
+
+    /// Approximate on-screen button width, used to decide what fits.
+    fn width(self) -> f32 {
+        match self {
+            ToolbarItem::Phantom => 34.0,
+            ToolbarItem::Line12 => 56.0,
+            ToolbarItem::Mute => 40.0,
+            ToolbarItem::Mono => 42.0,
+            ToolbarItem::Bypass => 50.0,
+            ToolbarItem::ResetSolo => 72.0,
+            ToolbarItem::ResetMute => 76.0,
+        }
+    }
+}
+
+const STRIP_WIDTH: f32 = 101.0; // Approximate width of one channel strip incl. separator
+const BUS_PANEL_WIDTH: f32 = 116.0; // Approximate width of the right-hand bus strip
+const MIN_WINDOW_WIDTH: f32 = 220.0;
+const MIN_WINDOW_HEIGHT: f32 = 600.0;
 
 impl BatonApp {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
@@ -125,6 +226,18 @@ impl BatonApp {
             }
         }
 
+        let hidden_channels = config_dir
+            .as_ref()
+            .and_then(|d| std::fs::read_to_string(d.join("view.json")).ok())
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+
+        let hidden_toolbar = config_dir
+            .as_ref()
+            .and_then(|d| std::fs::read_to_string(d.join("toolbar.json")).ok())
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+
         Self {
             ps,
             config_dir,
@@ -141,6 +254,26 @@ impl BatonApp {
             clip_indicators: HashMap::new(),
             peak_holds: HashMap::new(),
             strip_colors: HashMap::new(),
+            hidden_channels,
+            hidden_toolbar,
+            last_min_width: 0.0,
+            window_size: None,
+        }
+    }
+
+    fn save_view(&self) {
+        if let Some(ref dir) = self.config_dir
+            && let Ok(s) = serde_json::to_string(&self.hidden_channels)
+        {
+            let _ = std::fs::write(dir.join("view.json"), s);
+        }
+    }
+
+    fn save_toolbar(&self) {
+        if let Some(ref dir) = self.config_dir
+            && let Ok(s) = serde_json::to_string(&self.hidden_toolbar)
+        {
+            let _ = std::fs::write(dir.join("toolbar.json"), s);
         }
     }
 
@@ -432,6 +565,14 @@ impl BatonApp {
                     if ui.button("Reset to default").clicked() {
                         action = StripAction::ColorChanged(egui::Color32::TRANSPARENT);
                         ui.close();
+                    }
+
+                    if matches!(strip.kind, usb::StripKind::Channel) {
+                        ui.separator();
+                        if ui.button("Hide channel").clicked() {
+                            action = StripAction::HideChannel;
+                            ui.close();
+                        }
                     }
                 });
 
@@ -911,6 +1052,36 @@ impl eframe::App for BatonApp {
         // Request repaint to keep UI responsive
         ui.ctx().request_repaint_after(self.tick_rate);
 
+        // Remember the window size (ignoring maximized/fullscreen) for the next start.
+        ui.ctx().input(|i| {
+            let vp = i.viewport();
+            if vp.maximized != Some(true) && vp.fullscreen != Some(true) {
+                // inner_rect isn't reported on every platform (e.g. Wayland);
+                // the content area is the same size on a desktop.
+                let size = vp
+                    .inner_rect
+                    .map(|r| r.size())
+                    .unwrap_or_else(|| i.content_rect().size());
+                self.window_size = Some([size.x, size.y]);
+            }
+        });
+
+        // Size the minimum window width to the visible strips (plus the bus strip).
+        let channel_count = self.ps.lock().unwrap().channel_names.len();
+        let visible = (0..channel_count)
+            .filter(|i| !self.hidden_channels.contains(i))
+            .count();
+        let min_width = (visible as f32 * STRIP_WIDTH + BUS_PANEL_WIDTH)
+            .clamp(MIN_WINDOW_WIDTH, 1200.0);
+        if (min_width - self.last_min_width).abs() > 0.5 {
+            self.last_min_width = min_width;
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(
+                    min_width,
+                    MIN_WINDOW_HEIGHT,
+                )));
+        }
+
         // Top panel with controls
         egui::Panel::top("top_panel").show_inside(ui, |ui| {
             // Menu bar
@@ -943,15 +1114,70 @@ impl eframe::App for BatonApp {
                     }
                 });
 
+                // Keep the View menu open until the user clicks outside it
+                // or clicks the View button again.
+                egui::containers::menu::MenuButton::new("View")
+                    .config(
+                        egui::containers::menu::MenuConfig::new()
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
+                    )
+                    .ui(ui, |ui| {
+                    let names: Vec<String> = self.ps.lock().unwrap().channel_names.clone();
+                    let before = self.hidden_channels.clone();
+                    ui.label("Visible channels:");
+                    if ui.button("Show all").clicked() {
+                        self.hidden_channels.clear();
+                    }
+                    if ui.button("Hide all").clicked() {
+                        self.hidden_channels = (0..names.len()).collect();
+                    }
+                    ui.separator();
+                    egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                        for (i, name) in names.iter().enumerate() {
+                            let mut visible = !self.hidden_channels.contains(&i);
+                            if ui.checkbox(&mut visible, name).changed() {
+                                if visible {
+                                    self.hidden_channels.remove(&i);
+                                } else {
+                                    self.hidden_channels.insert(i);
+                                }
+                            }
+                        }
+                    });
+                    if self.hidden_channels != before {
+                        self.save_view();
+                    }
+
+                    ui.separator();
+                    ui.label("Toolbar buttons (hidden first when narrow):");
+                    let toolbar_before = self.hidden_toolbar.clone();
+                    for item in ToolbarItem::ALL {
+                        let mut enabled = !self.hidden_toolbar.contains(item.key());
+                        if ui.checkbox(&mut enabled, item.label()).changed() {
+                            if enabled {
+                                self.hidden_toolbar.remove(item.key());
+                            } else {
+                                self.hidden_toolbar.insert(item.key().to_string());
+                            }
+                        }
+                    }
+                    if self.hidden_toolbar != toolbar_before {
+                        self.save_toolbar();
+                    }
+                });
+
                 ui.separator();
 
                 egui::widgets::global_theme_preference_switch(ui);
             });
 
             ui.horizontal(|ui| {
-                ui.heading("Baton Mixer");
-
-                ui.separator();
+                // The title bar already says "Baton Mixer"; only show the
+                // heading when there is plenty of room.
+                if ui.available_width() > 600.0 {
+                    ui.heading("Baton Mixer");
+                    ui.separator();
+                }
 
                 // Mix selector
                 ui.label("Mix:");
@@ -969,64 +1195,92 @@ impl eframe::App for BatonApp {
 
                 ui.separator();
 
+                // Decide which toolbar buttons fit: enabled buttons are admitted in
+                // priority order until the row is full, so the least important ones
+                // drop out first when the window shrinks.
+                let spacing = ui.spacing().item_spacing.x;
+                let mut budget = ui.available_width();
+                let mut shown: Vec<ToolbarItem> = Vec::new();
+                for item in ToolbarItem::BY_PRIORITY {
+                    if self.hidden_toolbar.contains(item.key()) {
+                        continue;
+                    }
+                    let needed = item.width() + spacing;
+                    if needed > budget {
+                        break;
+                    }
+                    budget -= needed;
+                    shown.push(item);
+                }
+                let show = |item: ToolbarItem| shown.contains(&item);
+
                 // Global controls
                 let mut ps = self.ps.lock().unwrap();
 
-                let phantom_power = ps.phantom_power;
-                if ui
-                    .add(egui::Button::new("48V").fill(if phantom_power {
-                        egui::Color32::BLUE
-                    } else {
-                        egui::Color32::DARK_GRAY
-                    }))
-                    .clicked()
-                {
-                    ps.set_phantom_power(!phantom_power);
+                if show(ToolbarItem::Phantom) {
+                    let phantom_power = ps.phantom_power;
+                    if ui
+                        .add(egui::Button::new("48V").fill(if phantom_power {
+                            egui::Color32::BLUE
+                        } else {
+                            egui::Color32::DARK_GRAY
+                        }))
+                        .clicked()
+                    {
+                        ps.set_phantom_power(!phantom_power);
+                    }
                 }
 
-                let in_1_2_line = ps.in_1_2_line;
-                if ui
-                    .add(egui::Button::new("1-2 Line").fill(if in_1_2_line {
-                        egui::Color32::BLUE
-                    } else {
-                        egui::Color32::DARK_GRAY
-                    }))
-                    .clicked()
-                {
-                    ps.set_1_2_line(!in_1_2_line);
+                if show(ToolbarItem::Line12) {
+                    let in_1_2_line = ps.in_1_2_line;
+                    if ui
+                        .add(egui::Button::new("1-2 Line").fill(if in_1_2_line {
+                            egui::Color32::BLUE
+                        } else {
+                            egui::Color32::DARK_GRAY
+                        }))
+                        .clicked()
+                    {
+                        ps.set_1_2_line(!in_1_2_line);
+                    }
                 }
 
-                let main_mute = ps.main_mute;
-                if ui
-                    .add(egui::Button::new("Mute").fill(if main_mute {
-                        egui::Color32::RED
-                    } else {
-                        egui::Color32::DARK_GRAY
-                    }))
-                    .clicked()
-                {
-                    ps.set_main_mute(!main_mute);
+                if show(ToolbarItem::Mute) {
+                    let main_mute = ps.main_mute;
+                    if ui
+                        .add(egui::Button::new("Mute").fill(if main_mute {
+                            egui::Color32::RED
+                        } else {
+                            egui::Color32::DARK_GRAY
+                        }))
+                        .clicked()
+                    {
+                        ps.set_main_mute(!main_mute);
+                    }
                 }
 
-                let main_mono = ps.main_mono;
-                if ui
-                    .add(egui::Button::new("Mono").fill(if main_mono {
-                        egui::Color32::YELLOW
-                    } else {
-                        egui::Color32::DARK_GRAY
-                    }))
-                    .clicked()
-                {
-                    ps.set_main_mono(!main_mono);
+                if show(ToolbarItem::Mono) {
+                    let main_mono = ps.main_mono;
+                    if ui
+                        .add(egui::Button::new("Mono").fill(if main_mono {
+                            egui::Color32::YELLOW
+                        } else {
+                            egui::Color32::DARK_GRAY
+                        }))
+                        .clicked()
+                    {
+                        ps.set_main_mono(!main_mono);
+                    }
                 }
 
-                if ui
-                    .add(egui::Button::new("Bypass").fill(if self.bypass {
-                        egui::Color32::LIGHT_BLUE
-                    } else {
-                        egui::Color32::DARK_GRAY
-                    }))
-                    .clicked()
+                if show(ToolbarItem::Bypass)
+                    && ui
+                        .add(egui::Button::new("Bypass").fill(if self.bypass {
+                            egui::Color32::LIGHT_BLUE
+                        } else {
+                            egui::Color32::DARK_GRAY
+                        }))
+                        .clicked()
                 {
                     self.bypass = !self.bypass;
                     if self.bypass {
@@ -1036,52 +1290,58 @@ impl eframe::App for BatonApp {
                     }
                 }
 
-                ui.separator();
+                if show(ToolbarItem::ResetSolo) || show(ToolbarItem::ResetMute) {
+                    ui.separator();
+                }
 
                 // Reset solo button
-                let solo_exists = ps.mixes[self.active_mix_index].has_solo();
-                if ui
-                    .add(
-                        egui::Button::new(egui::RichText::new("Reset solo").color(
-                            if solo_exists {
-                                egui::Color32::BLACK
+                if show(ToolbarItem::ResetSolo) {
+                    let solo_exists = ps.mixes[self.active_mix_index].has_solo();
+                    if ui
+                        .add(
+                            egui::Button::new(egui::RichText::new("Reset solo").color(
+                                if solo_exists {
+                                    egui::Color32::BLACK
+                                } else {
+                                    egui::Color32::LIGHT_GRAY
+                                },
+                            ))
+                            .fill(if solo_exists {
+                                egui::Color32::YELLOW
                             } else {
-                                egui::Color32::LIGHT_GRAY
-                            },
-                        ))
-                        .fill(if solo_exists {
-                            egui::Color32::YELLOW
-                        } else {
-                            egui::Color32::DARK_GRAY
-                        }),
-                    )
-                    .clicked()
-                {
-                    ps.mixes[self.active_mix_index].reset_solo();
-                    ps.write_state();
+                                egui::Color32::DARK_GRAY
+                            }),
+                        )
+                        .clicked()
+                    {
+                        ps.mixes[self.active_mix_index].reset_solo();
+                        ps.write_state();
+                    }
                 }
 
                 // Reset mute button
-                let mute_exists = ps.mixes[self.active_mix_index].has_mute();
-                if ui
-                    .add(
-                        egui::Button::new(egui::RichText::new("Reset mute").color(
-                            if mute_exists {
-                                egui::Color32::BLACK
+                if show(ToolbarItem::ResetMute) {
+                    let mute_exists = ps.mixes[self.active_mix_index].has_mute();
+                    if ui
+                        .add(
+                            egui::Button::new(egui::RichText::new("Reset mute").color(
+                                if mute_exists {
+                                    egui::Color32::BLACK
+                                } else {
+                                    egui::Color32::LIGHT_GRAY
+                                },
+                            ))
+                            .fill(if mute_exists {
+                                egui::Color32::RED
                             } else {
-                                egui::Color32::LIGHT_GRAY
-                            },
-                        ))
-                        .fill(if mute_exists {
-                            egui::Color32::RED
-                        } else {
-                            egui::Color32::DARK_GRAY
-                        }),
-                    )
-                    .clicked()
-                {
-                    ps.mixes[self.active_mix_index].reset_mute();
-                    ps.write_state();
+                                egui::Color32::DARK_GRAY
+                            }),
+                        )
+                        .clicked()
+                    {
+                        ps.mixes[self.active_mix_index].reset_mute();
+                        ps.write_state();
+                    }
                 }
             });
         });
@@ -1158,6 +1418,9 @@ impl eframe::App for BatonApp {
 
                     // Draw channel strips (mono - no right meter)
                     for (i, strip) in mix.strips.channel_strips.iter_mut().enumerate() {
+                        if self.hidden_channels.contains(&i) {
+                            continue;
+                        }
                         let (mut name, meter_value) = strip_data[i].clone();
                         let meter_id = format!("ch_{}", i);
                         let strip_id = format!("{}:{}", self.active_mix_index, i);
@@ -1265,12 +1528,18 @@ impl eframe::App for BatonApp {
                         self.strip_colors.insert(strip_id, color);
                     }
                 }
+                StripAction::HideChannel => {
+                    self.hidden_channels.insert(strip_index);
+                    self.save_view();
+                    self.status_message =
+                        "Channel hidden - restore it from the View menu".to_string();
+                }
                 StripAction::None => {}
             }
         }
     }
 
-    fn on_exit(&mut self) {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         log::info!("Saving configuration...");
 
         // Save config
@@ -1286,6 +1555,13 @@ impl eframe::App for BatonApp {
                 }
             }
         };
+
+        // Save window size
+        if let (Some(size), Some(path)) = (self.window_size, window_file())
+            && let Ok(json) = serde_json::to_string(&size)
+        {
+            let _ = std::fs::write(path, json);
+        }
 
         // Save MIDI mapping
         self.save_midi_mapping();
